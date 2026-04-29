@@ -1,0 +1,1697 @@
+#include "mainwindow.h"
+#include "ui_mainwindow.h"
+
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QLabel>
+#include <QDateTime>
+#include <QFrame>
+#include <QDebug>
+#include <QPushButton>
+#include <QCheckBox>
+#include <QSpinBox>
+#include <QComboBox>
+#include <QGroupBox>
+#include <QFormLayout>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QMessageBox>
+#include <QFile>
+#include <QTextStream>
+#include <QPainter>
+#include <QtCharts/QChart>
+#include <QtCharts/QChartView>
+#include <QtCharts/QLineSeries>
+#include <QtCharts/QValueAxis>
+#include <numeric>
+#include <algorithm>
+#include <cmath>
+
+#include "ltr11.h"
+#include "ltr114.h"
+
+QString MainWindow::module_name(WORD mid)
+{
+    switch (mid)
+    {
+    case LTR_MID_EMPTY: return "EMPTY";
+    case LTR_MID_IDENTIFYING: return "IDENTIFYING";
+    // case LTR_MID_INVALID: return "INVALID";
+    case LTR_MID_LTR01: return "LTR01";
+    case LTR_MID_LTR11: return "LTR11";
+    case LTR_MID_LTR22: return "LTR22";
+    case LTR_MID_LTR24: return "LTR24";
+    case LTR_MID_LTR25: return "LTR25";
+    case LTR_MID_LTR27: return "LTR27";
+    case LTR_MID_LTR34: return "LTR34";
+    case LTR_MID_LTR35: return "LTR35";
+    case LTR_MID_LTR41: return "LTR41";
+    case LTR_MID_LTR42: return "LTR42";
+    case LTR_MID_LTR43: return "LTR43";
+    case LTR_MID_LTR51: return "LTR51";
+    case LTR_MID_LTR114: return "LTR114";
+    case LTR_MID_LTR210: return "LTR210";
+    case LTR_MID_LTR212: return "LTR212";
+    default: return QString("Unknown (%1, 0x%2)").arg(mid).arg(QString::number(mid, 16).toUpper());
+    }
+}
+
+MainWindow::MainWindow(QWidget *parent)
+    : QMainWindow(parent)
+    , ui(new Ui::MainWindow)
+    , startButton(nullptr)
+    , stopButton(nullptr)
+    , sampleRateSpin(nullptr)
+    , plotEverySpin(nullptr)
+    , chunkSizeSpin(nullptr)
+    , saveToFileCheck(nullptr)
+    , unitCombo(nullptr)
+    , plotSettingsButton(nullptr)
+    , commonSettingsGroup(nullptr)
+    , ltr114SettingsGroup(nullptr)
+    , range114Combo(nullptr)
+    , physicalChannel114Spin(nullptr)
+    , interval114Spin(nullptr)
+    , syncMode114Combo(nullptr)
+    , simulationSettingsGroup(nullptr)
+    , simulationRateSpin(nullptr)
+    , ltr212SettingsGroup(nullptr)
+    , acqMode212Combo(nullptr)
+    , useClb212Check(nullptr)
+    , useFabricClb212Check(nullptr)
+    , refVoltage212Combo(nullptr)
+    , acMode212Combo(nullptr)
+    , channelCount212Spin(nullptr)
+    , range212Combo(nullptr)
+    , chartView114(nullptr)
+    , chartView212(nullptr)
+    , chart114(nullptr)
+    , chart212(nullptr)
+    , lineSeries114(nullptr)
+    , lineSeries212(nullptr)
+    , axisX114(nullptr)
+    , axisY114(nullptr)
+    , axisX212(nullptr)
+    , axisY212(nullptr)
+    , m_ltr114Slot(-1)
+    , m_ltr212Slot(-1)
+    , m_captureRunning(false)
+    , m_captureFile(nullptr)
+    , m_captureStream(nullptr)
+    , m_simulationMode(false)
+    , m_simulatedSampleAccumulator(0.0)
+    , m_simulatedSampleAccumulator212(0.0)
+{
+    ui->setupUi(this);
+    qRegisterMetaType<QVector<TimedSample>>("QVector<TimedSample>");
+
+    init_ui_replace();
+    setup_plot();
+    appendInfo("Приложение запущено.");
+
+    init_ltr();
+    update_plot_visibility();
+    update_ltr114_controls_state();
+    update_ltr212_controls_state();
+    update_simulation_controls_state();
+}
+
+MainWindow::~MainWindow()
+{
+    m_captureRunning = false;
+    if (m_simulationTimer)
+        m_simulationTimer->stop();
+
+    stop_worker_threads();
+    close_ltr114_capture();
+    close_ltr212_capture();
+
+    if (saveToFileCheck && saveToFileCheck->isChecked()) {
+        append_samples_to_file(m_pendingFileSamples114, 0);
+        append_samples_to_file(m_pendingFileSamples212, 1);
+    }
+    m_pendingFileSamples114.clear();
+    m_pendingFileSamples212.clear();
+    close_capture_files();
+
+    if (m_crate && m_crate->is_open())
+        m_crate->stop_sync_marks();
+
+    delete ui;
+}
+
+void MainWindow::init_ui_replace()
+{
+    QWidget* central = ui->centralwidget ? ui->centralwidget : new QWidget(this);
+    setCentralWidget(central);
+
+    QHBoxLayout* main_lay = new QHBoxLayout;
+    central->setLayout(main_lay);
+
+    modulesList = new QListWidget(this);
+    modulesList->setMinimumWidth(320);
+    modulesList->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    modulesList->setSelectionMode(QAbstractItemView::NoSelection);
+    modulesList->setFocusPolicy(Qt::NoFocus);
+
+    QWidget* rightPanel = new QWidget(this);
+    QVBoxLayout* rightLay = new QVBoxLayout(rightPanel);
+
+    QHBoxLayout* controlLay = new QHBoxLayout;
+    sampleRateSpin = new QSpinBox(this);
+    sampleRateSpin->setRange(1, 4000);
+    sampleRateSpin->setValue(100);
+    sampleRateSpin->setSuffix(" Гц");
+
+    plotEverySpin = new QSpinBox(this);
+    plotEverySpin->setRange(1, 10000);
+    plotEverySpin->setValue(1);
+
+    chunkSizeSpin = new QSpinBox(this);
+    chunkSizeSpin->setRange(16, 20000);
+    chunkSizeSpin->setValue(3000);
+
+    startButton = new QPushButton("Старт", this);
+    stopButton = new QPushButton("Остановить", this);
+    stopButton->setEnabled(false);
+
+    controlLay->addWidget(startButton);
+    controlLay->addWidget(stopButton);
+
+    saveToFileCheck = new QCheckBox("Сохранять файл", this);
+    saveToFileCheck->setChecked(true);
+
+    unitCombo = new QComboBox(this);
+    unitCombo->addItem("mV", "mV");
+    unitCombo->addItem("V", "V");
+
+    plotSettingsButton = new QPushButton("Настройки графиков", this);
+    controlLay->addStretch(1);
+    controlLay->addWidget(plotSettingsButton);
+
+    rightLay->addLayout(controlLay);
+
+    commonSettingsGroup = new QGroupBox("Общие параметры", this);
+    QFormLayout* commonLay = new QFormLayout(commonSettingsGroup);
+    commonLay->addRow("Прореживание графика:", plotEverySpin);
+    commonLay->addRow("Размер блока:", chunkSizeSpin);
+    commonLay->addRow("Сохранение:", saveToFileCheck);
+    commonLay->addRow("Единицы:", unitCombo);
+    rightLay->addWidget(commonSettingsGroup);
+
+    ltr114SettingsGroup = new QGroupBox("Настройки LTR114", this);
+    QFormLayout* ltr114Lay = new QFormLayout(ltr114SettingsGroup);
+
+    physicalChannel114Spin = new QSpinBox(ltr114SettingsGroup);
+    physicalChannel114Spin->setRange(1, LTR114_MAX_CHANNEL);
+    physicalChannel114Spin->setValue(1);
+
+    range114Combo = new QComboBox(ltr114SettingsGroup);
+    range114Combo->addItem("+/-10 V", LTR114_URANGE_10);
+    range114Combo->addItem("+/-2 V", LTR114_URANGE_2);
+    range114Combo->addItem("+/-0.4 V", LTR114_URANGE_04);
+    range114Combo->setCurrentIndex(2);
+
+    syncMode114Combo = new QComboBox(ltr114SettingsGroup);
+    syncMode114Combo->addItem("Internal", LTR114_SYNCMODE_INTERNAL);
+    syncMode114Combo->addItem("Master", LTR114_SYNCMODE_MASTER);
+    syncMode114Combo->addItem("External", LTR114_SYNCMODE_EXTERNAL);
+    syncMode114Combo->addItem("None", LTR114_SYNCMODE_NONE);
+
+    interval114Spin = new QSpinBox(ltr114SettingsGroup);
+    interval114Spin->setRange(0, 65535);
+    interval114Spin->setValue(0);
+    ltr114Lay->addRow("Частота АЦП:", sampleRateSpin);
+    ltr114Lay->addRow("Канал:", physicalChannel114Spin);
+    ltr114Lay->addRow("Диапазон:", range114Combo);
+    ltr114Lay->addRow("SyncMode:", syncMode114Combo);
+    ltr114Lay->addRow("Interval:", interval114Spin);
+    rightLay->addWidget(ltr114SettingsGroup);
+
+    simulationSettingsGroup = new QGroupBox("Режим симуляции", this);
+    QFormLayout* simulationLay = new QFormLayout(simulationSettingsGroup);
+    simulationRateSpin = new QSpinBox(simulationSettingsGroup);
+    simulationRateSpin->setRange(1, 4000);
+    simulationRateSpin->setValue(sampleRateSpin->value());
+    simulationRateSpin->setSuffix(" Гц");
+    simulationLay->addRow("Частота симуляции:", simulationRateSpin);
+    simulationSettingsGroup->setVisible(false);
+    rightLay->addWidget(simulationSettingsGroup);
+
+    ltr212SettingsGroup = new QGroupBox("Настройки LTR212", this);
+    QFormLayout* ltr212Lay = new QFormLayout(ltr212SettingsGroup);
+
+    acqMode212Combo = new QComboBox(ltr212SettingsGroup);
+    acqMode212Combo->addItem("4 канала, средняя точность", LTR212_FOUR_CHANNELS_WITH_MEDIUM_RESOLUTION);
+    acqMode212Combo->addItem("4 канала, высокая точность", LTR212_FOUR_CHANNELS_WITH_HIGH_RESOLUTION);
+    acqMode212Combo->addItem("8 каналов, высокая точность", LTR212_EIGHT_CHANNELS_WITH_HIGH_RESOLUTION);
+    acqMode212Combo->setCurrentIndex(1);
+
+    useClb212Check = new QCheckBox(ltr212SettingsGroup);
+    useClb212Check->setChecked(false);
+
+    useFabricClb212Check = new QCheckBox(ltr212SettingsGroup);
+    useFabricClb212Check->setChecked(true);
+
+    refVoltage212Combo = new QComboBox(ltr212SettingsGroup);
+    refVoltage212Combo->addItem("2.5 В", LTR212_REF_2_5V);
+    refVoltage212Combo->addItem("5 В", LTR212_REF_5V);
+    refVoltage212Combo->setCurrentIndex(1);
+
+    acMode212Combo = new QComboBox(ltr212SettingsGroup);
+    acMode212Combo->addItem("DC", 0);
+    acMode212Combo->addItem("AC", 1);
+
+    channelCount212Spin = new QSpinBox(ltr212SettingsGroup);
+    channelCount212Spin->setRange(1, 4);
+    channelCount212Spin->setValue(1);
+
+    range212Combo = new QComboBox(ltr212SettingsGroup);
+    range212Combo->addItem("±10 мВ", LTR212_SCALE_B_10);
+    range212Combo->addItem("±20 мВ", LTR212_SCALE_B_20);
+    range212Combo->addItem("±40 мВ", LTR212_SCALE_B_40);
+    range212Combo->addItem("±80 мВ", LTR212_SCALE_B_80);
+    range212Combo->addItem("0..+10 мВ", LTR212_SCALE_U_10);
+    range212Combo->addItem("0..+20 мВ", LTR212_SCALE_U_20);
+    range212Combo->addItem("0..+40 мВ", LTR212_SCALE_U_40);
+    range212Combo->addItem("0..+80 мВ", LTR212_SCALE_U_80);
+    range212Combo->setCurrentIndex(3);
+
+    ltr212Lay->addRow("Режим сбора:", acqMode212Combo);
+    ltr212Lay->addRow("UseClb:", useClb212Check);
+    ltr212Lay->addRow("UseFabricClb:", useFabricClb212Check);
+    ltr212Lay->addRow("Опорное:", refVoltage212Combo);
+    ltr212Lay->addRow("AC/DC:", acMode212Combo);
+    ltr212Lay->addRow("Каналов:", channelCount212Spin);
+    ltr212Lay->addRow("Диапазон:", range212Combo);
+    rightLay->addWidget(ltr212SettingsGroup);
+
+    infoText = new QTextEdit(this);
+    infoText->setReadOnly(true);
+    infoText->setAcceptRichText(false);
+    QFont f = infoText->font();
+    f.setFamily("Monospace");
+    f.setStyleHint(QFont::Monospace);
+    infoText->setFont(f);
+
+    rightLay->addWidget(infoText, 1);
+
+    main_lay->addWidget(modulesList, 0);
+    main_lay->addWidget(rightPanel, 1);
+
+    connect(startButton, &QPushButton::clicked, this, &MainWindow::on_start_capture_clicked);
+    connect(stopButton, &QPushButton::clicked, this, &MainWindow::on_stop_capture_clicked);
+    connect(unitCombo, &QComboBox::currentTextChanged, this, [this](const QString&) {
+        update_axis_unit_labels();
+    });
+    connect(plotSettingsButton, &QPushButton::clicked, this, &MainWindow::show_plot_settings_dialog);
+    connect(acqMode212Combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        update_ltr212_channel_limit();
+    });
+
+    appendInfo("Информационный виджет создан.");
+}
+
+void MainWindow::setup_plot()
+{
+    lineSeries114 = new QLineSeries(this);
+    lineSeries212 = new QLineSeries(this);
+    lineSeries114->setName("LTR114");
+    lineSeries212->setName("LTR212");
+    lineSeries114->setColor(Qt::blue);
+    lineSeries212->setColor(Qt::red);
+
+    chart114 = new QChart();
+    chart114->addSeries(lineSeries114);
+    chart114->legend()->setVisible(false);
+    chart114->setTitle("LTR114");
+
+    axisX114 = new QValueAxis();
+    axisX114->setTitleText("Тики");
+    axisX114->setLabelFormat("%i");
+    axisX114->setRange(0, m_plotWindowTicks);
+
+    axisY114 = new QValueAxis();
+    axisY114->setTitleText("Напряжение, mV");
+    axisY114->setLabelFormat("%.3f");
+    axisY114->setRange(-100.0, 100.0);
+
+    chart114->addAxis(axisX114, Qt::AlignBottom);
+    chart114->addAxis(axisY114, Qt::AlignLeft);
+    lineSeries114->attachAxis(axisX114);
+    lineSeries114->attachAxis(axisY114);
+
+    chartView114 = new QChartView(chart114, this);
+    chartView114->setMinimumHeight(240);
+    chartView114->setRenderHint(QPainter::Antialiasing);
+
+    chart212 = new QChart();
+    chart212->addSeries(lineSeries212);
+    chart212->legend()->setVisible(false);
+    chart212->setTitle("LTR212");
+
+    axisX212 = new QValueAxis();
+    axisX212->setTitleText("Тики");
+    axisX212->setLabelFormat("%i");
+    axisX212->setRange(0, m_plotWindowTicks);
+
+    axisY212 = new QValueAxis();
+    axisY212->setTitleText("Напряжение, mV");
+    axisY212->setLabelFormat("%.3f");
+    axisY212->setRange(-100.0, 100.0);
+
+    chart212->addAxis(axisX212, Qt::AlignBottom);
+    chart212->addAxis(axisY212, Qt::AlignLeft);
+    lineSeries212->attachAxis(axisX212);
+    lineSeries212->attachAxis(axisY212);
+
+    chartView212 = new QChartView(chart212, this);
+    chartView212->setMinimumHeight(240);
+    chartView212->setRenderHint(QPainter::Antialiasing);
+
+    auto* rightLay = qobject_cast<QVBoxLayout*>(qobject_cast<QWidget*>(infoText->parentWidget())->layout());
+    if (rightLay) {
+        const int insertIndex = qMax(1, rightLay->count() - 1);
+        rightLay->insertWidget(insertIndex, chartView114, 2);
+        rightLay->insertWidget(insertIndex + 1, chartView212, 2);
+    }
+}
+
+void MainWindow::appendInfo(const QString &msg, bool isError)
+{
+    QString time = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+    QString line = QString("[%1] %2").arg(time, msg);
+    if (isError) {
+        infoText->setTextColor(Qt::red);
+        infoText->append(line);
+        infoText->setTextColor(Qt::black);
+    } else {
+        infoText->append(line);
+    }
+
+    qDebug() << line;
+}
+
+QWidget* MainWindow::createModuleItemWidget(int slot, const QString &name, bool ok)
+{
+    QWidget* w = new QWidget;
+    QHBoxLayout* lay = new QHBoxLayout(w);
+    lay->setContentsMargins(6, 3, 6, 3);
+
+    QLabel* slot_label = new QLabel(QString("Слот %1").arg(slot));
+    slot_label->setMinimumWidth(70);
+    QLabel* name_label = new QLabel(name);
+    name_label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
+    QLabel* indicator = new QLabel;
+    indicator->setFixedSize(14, 14);
+    indicator->setObjectName(QString("indicator_%1").arg(slot));
+    indicator->setStyleSheet(QString("border-radius:7px; background-color: %1;")
+                                 .arg(ok ? "green" : "red"));
+
+    lay->addWidget(slot_label);
+    lay->addWidget(name_label, 1);
+    lay->addWidget(indicator);
+    return w;
+}
+
+void MainWindow::setModuleStatus(int slot, bool ok)
+{
+    QWidget* w = moduleWidgets.value(slot, nullptr);
+    if (!w) return;
+    QLabel* ind = w->findChild<QLabel*>(QString("indicator_%1").arg(slot));
+    if (ind) {
+        ind->setStyleSheet(QString("border-radius:7px; background-color: %1;")
+                               .arg(ok ? "green" : "red"));
+    }
+}
+
+void MainWindow::run_ltr11_module(const QString& crate_sn, int ltr11_slot)
+{
+    Q_UNUSED(crate_sn)
+    Q_UNUSED(ltr11_slot)
+}
+
+void MainWindow::run_ltr114_module(const QString& crate_sn, int ltr114_slot)
+{
+    m_crateSerial = crate_sn;
+    m_ltr114Slot = ltr114_slot;
+    appendInfo(QString("LTR114 найден в слоте %1. Готов к непрерывному сбору.").arg(ltr114_slot));
+    update_ltr114_controls_state();
+    update_plot_visibility();
+}
+
+bool MainWindow::open_ltr114_for_capture()
+{
+    if (m_simulationMode) {
+        m_simulatedSampleAccumulator = 0.0;
+        m_simulatedSignalTick = 0;
+        const int simRate = simulationRateSpin ? simulationRateSpin->value() : sampleRateSpin->value();
+        appendInfo(QString("Сбор запущен в режиме симуляции. Частота=%1 Гц").arg(simRate));
+        return true;
+    }
+
+    if (m_crateSerial.isEmpty() || m_ltr114Slot < 0) {
+        appendInfo("Не найден LTR114: невозможно запустить сбор.", true);
+        return false;
+    }
+
+    m_ltr114 = std::make_unique<LTR114>();
+
+    if (!m_ltr114->open(m_crateSerial, m_ltr114Slot)) {
+        appendInfo("Не удалось открыть LTR114 для сбора.", true);
+        m_ltr114.reset();
+        setModuleStatus(m_ltr114Slot, false);
+        return false;
+    }
+
+    if (!m_ltr114->get_config()) {
+        appendInfo("Не удалось получить конфигурацию LTR114.", true);
+        m_ltr114.reset();
+        return false;
+    }
+
+    TLTR114_LCHANNEL lch_tbl[1];
+
+    const int physicalChannel = qBound(0,
+                                       (physicalChannel114Spin ? physicalChannel114Spin->value() : 1) - 1,
+                                       LTR114_MAX_CHANNEL - 1);
+    const int rangeCode = range114Combo ? range114Combo->currentData().toInt() : LTR114_URANGE_04;
+    const int syncMode = syncMode114Combo ? syncMode114Combo->currentData().toInt() : LTR114_SYNCMODE_INTERNAL;
+    const WORD interval = static_cast<WORD>(qBound(0,
+                                                   interval114Spin ? interval114Spin->value() : 0,
+                                                   65535));
+
+    // указываем номер канала, режим и диапазон измерений
+    lch_tbl[0] = LTR114_CreateLChannel(LTR114_MEASMODE_U, physicalChannel, rangeCode);
+
+    const int requestedSampleRate = sampleRateSpin->value();
+    const int dividerValue = qBound(LTR114_FREQ_DIVIDER_MIN,
+                                    qRound(8000.0 / qMax(1, requestedSampleRate)),
+                                    LTR114_FREQ_DIVIDER_MAX);
+    const DWORD divider = static_cast<DWORD>(dividerValue);
+    // был тип string
+
+    m_ltr114->set_freq_divider(divider);
+    m_ltr114->set_logical_channels(1, lch_tbl);
+    m_ltr114->set_sync_mode(static_cast<DWORD>(syncMode));
+    m_ltr114->set_interval(interval);
+
+    if (!m_ltr114->apply_config()) {
+        appendInfo("Не удалось применить настройки АЦП LTR114.", true);
+        m_ltr114.reset();
+        return false;
+    }
+
+    if (LTR114_Calibrate(m_ltr114->handle()) != LTR_OK) {
+        appendInfo("LTR114: ошибка автокалибровки.", true);
+        m_ltr114.reset();
+        return false;
+    }
+
+    const double sampleRateHz = static_cast<double>(LTR114_FREQ(*m_ltr114->handle()));
+    appendInfo(QString("LTR114 сконфигурирован. Частота=%1 Гц (FreqDivider=%2, фактическая=%3 Гц)")
+                   .arg(requestedSampleRate)
+                   .arg(divider)
+                   .arg(QString::number(sampleRateHz, 'f', 2)));
+    setModuleStatus(m_ltr114Slot, true);
+    return true;
+}
+
+void MainWindow::close_ltr114_capture()
+{
+    if (m_simulationMode)
+        return;
+
+    if (!m_ltr114)
+        return;
+
+    if (m_ltr114Thread && m_ltr114Thread->isRunning()) {
+        appendInfo("LTR114: поток еще работает, закрытие модуля отложено.", true);
+        return;
+    }
+
+    m_ltr114->stop();
+    m_ltr114->close();
+    m_ltr114.reset();
+}
+
+
+bool MainWindow::open_ltr212_for_capture()
+{
+    if (m_simulationMode) {
+        appendInfo("Симуляция LTR212 не поддерживается пока");
+        return false;
+    }
+
+    if (m_crateSerial.isEmpty() || m_ltr212Slot < 0) {
+        appendInfo("LTR212 не найден в крейте", true);
+        return false;
+    }
+
+    m_ltr212 = std::make_unique<LTR212>();
+
+    if (!m_ltr212->open(m_crateSerial, m_ltr212Slot, "ltr212.bio")) {  // ← используй полную версию open
+        appendInfo("Не удалось открыть LTR212", true);
+        m_ltr212.reset();
+        return false;
+    }
+
+    const int acqMode = acqMode212Combo ? acqMode212Combo->currentData().toInt()
+                                        : LTR212_FOUR_CHANNELS_WITH_HIGH_RESOLUTION;
+    const int useClb = (useClb212Check && useClb212Check->isChecked()) ? 1 : 0;
+    const int useFabricClb = (useFabricClb212Check && useFabricClb212Check->isChecked()) ? 1 : 0;
+    const int refVoltage = refVoltage212Combo ? refVoltage212Combo->currentData().toInt() : LTR212_REF_5V;
+    const int acMode = acMode212Combo ? acMode212Combo->currentData().toInt() : 0;
+    const int rangeCode = range212Combo ? range212Combo->currentData().toInt() : LTR212_SCALE_B_80;
+    const int maxChannels = (acqMode == LTR212_EIGHT_CHANNELS_WITH_HIGH_RESOLUTION) ? 8 : 4;
+    const int ch_count = qBound(1,
+                                channelCount212Spin ? channelCount212Spin->value() : 1,
+                                maxChannels);
+
+    // ПРАВИЛЬНАЯ КОНФИГУРАЦИЯ
+    m_ltr212->set_size();                    // вызывается в open(), но на всякий случай (!!!!!)
+    m_ltr212->set_acq_mode(acqMode);
+    m_ltr212->set_use_clb(useClb);
+    m_ltr212->set_use_fabric_clb(useFabricClb);
+    m_ltr212->set_ref_voltage(refVoltage);
+    m_ltr212->set_ac_mode(acMode);
+
+    // === ЛОГИЧЕСКИЕ КАНАЛЫ — САМЫЙ ВАЖНЫЙ МОМЕНТ ===
+    INT ch_table[8] = {};
+
+    //  физический канал 1, диапазон ±80 мВ
+    for (int i = 0; i < ch_count; ++i) {
+        ch_table[i] = LTR212_CreateLChannel(i + 1, rangeCode);
+    }
+
+    // Если нужно несколько каналов
+    // ch_table[1] = LTR212_CreateLChannel(2, LTR212_SCALE_B_40);
+    // ch_table[2] = LTR212_CreateLChannel(3, LTR212_SCALE_B_20); и т.д.
+
+    m_ltr212->set_logical_channels(ch_count, ch_table);
+
+    // Применяем настройки
+    if (!m_ltr212->apply_config()) {   // внутри: LTR212_SetADC()
+        appendInfo("Не удалось применить конфигурацию LTR212", true);
+        m_ltr212.reset();
+        return false;
+    }
+
+    // Автокалибровка LTR212 отключена: на реальном модуле она падала внутри DLL.
+    // BYTE channelMask[LTR212_LCH_CNT_MAX] = {};
+    // for (int i = 0; i < ch_count; ++i)
+    //     channelMask[i] = 1;
+    // const INT calibrResult = LTR212_Calibrate(
+    //     m_ltr212->handle(), channelMask, LTR212_CALIBR_MODE_INT_FULL, 1);
+
+    appendInfo(QString("LTR212 сконфигурирован: %1 канал(ов), AcqMode=%2, REF=%3")
+                   .arg(ch_count)
+                   .arg(m_ltr212->handle()->AcqMode)
+                   .arg(refVoltage == LTR212_REF_5V ? "5V" : "2.5V"));
+    return true;
+}
+
+void MainWindow::close_ltr212_capture()
+{
+    if (!m_ltr212)
+        return;
+
+    if (m_ltr212Thread && m_ltr212Thread->isRunning()) {
+        appendInfo("LTR212: поток еще работает, закрытие модуля отложено.", true);
+        return;
+    }
+
+    m_ltr212->stop();
+    m_ltr212->close();
+    m_ltr212.reset();
+}
+
+void MainWindow::run_ltr212_module(const QString& crate_sn, int ltr212_slot)
+{
+    m_crateSerial = crate_sn;
+    m_ltr212Slot = ltr212_slot;
+    // m_crateSerial уже установлен LTR114 или можно установить отдельно
+    appendInfo(QString("LTR212 найден в слоте %1. Готов к работе.").arg(ltr212_slot));
+    update_ltr212_controls_state();
+    update_plot_visibility();
+}
+
+
+// ДЛЯ GLOBALTICK внутри Графика
+// void MainWindow::refresh_plot()
+// {
+//     const qreal factor = current_unit_factor();
+
+//     // === Масштабируем Y под выбранные единицы (mV → V) ===
+//     QVector<QPointF> scaled114;
+//     scaled114.reserve(m_plotPoints.size());
+//     for (const QPointF& p : m_plotPoints) {
+//         scaled114.append(QPointF(p.x(), p.y() * factor));
+//     }
+
+//     QVector<QPointF> scaled212;
+//     scaled212.reserve(m_plotPoints212.size());
+//     for (const QPointF& p : m_plotPoints212) {
+//         scaled212.append(QPointF(p.x(), p.y() * factor));
+//     }
+
+//     // === Обновляем данные на графике ===
+//     lineSeries->replace(scaled114);
+//     lineSeries212->replace(scaled212);
+
+//     // === Настройка оси X (теперь это реальное время в секундах) ===
+//     const bool has114 = !scaled114.isEmpty();
+//     const bool has212 = !scaled212.isEmpty();
+
+//     if (!has114 && !has212) {
+//         return;
+//     }
+
+//     qreal maxX = 0.0;
+//     if (has114) maxX = qMax(maxX, scaled114.last().x());
+//     if (has212) maxX = qMax(maxX, scaled212.last().x());
+
+//     // Показываем всё накопленное время, но минимум 10 секунд видно
+//     qreal minX = 0.0;
+//     const qreal windowSize = qMax(10.0, maxX * 0.2); // последние 20% времени или минимум 10 сек
+
+//     axisX->setTitleText("Время, секунды");
+//     axisX->setLabelFormat("%.1f");
+//     axisX->setRange(minX, qMax(10.0, maxX + 1.0));
+
+//     // === Автоматическая настройка оси Y ===
+//     qreal maxAbsV = (current_unit_name() == "V") ? 0.001 : 1.0;
+
+//     for (const QPointF& p : scaled114)
+//         maxAbsV = qMax(maxAbsV, std::abs(p.y()));
+//     for (const QPointF& p : scaled212)
+//         maxAbsV = qMax(maxAbsV, std::abs(p.y()));
+
+//     const qreal margin = maxAbsV * 0.12;
+//     axisY->setRange(-(maxAbsV + margin), maxAbsV + margin);
+// }
+
+
+
+void MainWindow::refresh_plot()
+{
+    const qreal factor = current_unit_factor();
+
+    QVector<QPointF> scaled114;
+    scaled114.reserve(m_plotPoints.size());
+    for (const QPointF& p : m_plotPoints)
+        scaled114.append(QPointF(p.x(), p.y() * factor));
+
+    QVector<QPointF> scaled212;
+    scaled212.reserve(m_plotPoints212.size());
+    for (const QPointF& p : m_plotPoints212)
+        scaled212.append(QPointF(p.x(), p.y() * factor));
+
+    if (lineSeries114)
+        lineSeries114->replace(scaled114);
+    lineSeries212->replace(scaled212);
+
+    auto updateAxes = [this](const QVector<QPointF>& points, QValueAxis* axisX, QValueAxis* axisY) {
+        if (!axisX || !axisY)
+            return;
+
+        axisX->setTitleText("Тики");
+        axisX->setLabelFormat("%i");
+
+        if (points.isEmpty()) {
+            axisX->setRange(0, qMax(1, m_plotWindowTicks));
+            axisY->setRange(m_autoScaleY ? -1.0 : m_manualYMin,
+                            m_autoScaleY ?  1.0 : m_manualYMax);
+            return;
+        }
+
+        const qreal firstX = points.first().x();
+        const qreal maxX = points.last().x();
+        if (m_autoScaleX) {
+            const qreal minWindowX = maxX - static_cast<qreal>(qMax(1, m_plotWindowTicks)) + 1.0;
+            const qreal minX = qMax(firstX, minWindowX);
+            axisX->setRange(minX, qMax(minX + 1.0, maxX));
+        } else {
+            axisX->setRange(firstX, qMax(firstX + 1.0, maxX));
+        }
+
+        if (!m_autoScaleY) {
+            axisY->setRange(m_manualYMin, m_manualYMax);
+            return;
+        }
+
+        qreal minY = points.first().y();
+        qreal maxY = points.first().y();
+        for (const QPointF& p : points) {
+            minY = qMin(minY, p.y());
+            maxY = qMax(maxY, p.y());
+        }
+        if (qFuzzyCompare(minY, maxY)) {
+            minY -= 1.0;
+            maxY += 1.0;
+        }
+        const qreal margin = qMax<qreal>((maxY - minY) * 0.1, current_unit_name() == "V" ? 0.000001 : 0.001);
+        axisY->setRange(minY - margin, maxY + margin);
+    };
+
+    updateAxes(scaled114, axisX114, axisY114);
+    updateAxes(scaled212, axisX212, axisY212);
+    update_plot_visibility();
+    return;
+
+    const bool has114 = !scaled114.isEmpty();
+    const bool has212 = !scaled212.isEmpty();
+    if (!has114 && !has212)
+        return;
+
+    qreal firstX = has114 ? scaled114.first().x() : scaled212.first().x();
+    qreal maxX   = has114 ? scaled114.last().x()  : scaled212.last().x();
+    if (has114 && has212) {
+        firstX = qMin(firstX, scaled212.first().x());
+        maxX   = qMax(maxX,   scaled212.last().x());
+    }
+
+    const qreal minWindowX = qMax<qreal>(1.0, maxX - static_cast<qreal>(PLOT_WINDOW_TICKS) + 1.0);
+    const qreal minX = qMax(firstX, minWindowX);
+
+    axisX114->setRange(minX, qMax(minX + 50.0, maxX));   // минимум 50 тиков видно
+    axisX114->setTitleText("Тики");
+    axisX114->setLabelFormat("%i");
+
+    // Y остаётся как было
+    qreal maxAbsV = (current_unit_name() == "V") ? 0.001 : 1.0;
+    for (const QPointF& p : scaled114) maxAbsV = qMax(maxAbsV, std::abs(p.y()));
+    for (const QPointF& p : scaled212) maxAbsV = qMax(maxAbsV, std::abs(p.y()));
+
+    const qreal margin = maxAbsV * 0.1;
+    axisY114->setRange(-(maxAbsV + margin), maxAbsV + margin);
+}
+
+double MainWindow::current_unit_factor() const
+{
+    return (unitCombo && unitCombo->currentData().toString() == "V") ? 1.0 : 1000.0;
+}
+
+QString MainWindow::current_unit_name() const
+{
+    return (unitCombo && unitCombo->currentData().toString() == "V") ? "V" : "mV";
+}
+
+void MainWindow::update_axis_unit_labels()
+{
+    const QString title = QString("Напряжение, %1").arg(current_unit_name());
+    const QString format = current_unit_name() == "V" ? "%.6f" : "%.3f";
+
+    if (axisY114) {
+        axisY114->setTitleText(title);
+        axisY114->setLabelFormat(format);
+    }
+    if (axisY212) {
+        axisY212->setTitleText(title);
+        axisY212->setLabelFormat(format);
+    }
+    refresh_plot();
+}
+
+void MainWindow::update_plot_visibility()
+{
+    const bool ltr114Available = m_simulationMode || m_usingLtr114 || m_ltr114Slot >= 0 || !m_plotPoints.isEmpty();
+    const bool ltr212Available = (m_simulationMode && m_simulateTwoModules) || m_usingLtr212 || m_ltr212Slot >= 0 || !m_plotPoints212.isEmpty();
+
+    if (chartView114)
+        chartView114->setVisible(m_showChart114 && ltr114Available);
+    if (chartView212)
+        chartView212->setVisible(m_showChart212 && ltr212Available);
+}
+
+void MainWindow::show_plot_settings_dialog()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Настройки графиков");
+
+    QFormLayout* form = new QFormLayout(&dialog);
+
+    QCheckBox* autoXCheck = new QCheckBox(&dialog);
+    autoXCheck->setChecked(m_autoScaleX);
+
+    QSpinBox* windowTicksSpin = new QSpinBox(&dialog);
+    windowTicksSpin->setRange(10, 10000000);
+    windowTicksSpin->setValue(qMax(10, m_plotWindowTicks));
+
+    QCheckBox* autoYCheck = new QCheckBox(&dialog);
+    autoYCheck->setChecked(m_autoScaleY);
+
+    QDoubleSpinBox* yMinSpin = new QDoubleSpinBox(&dialog);
+    yMinSpin->setRange(-1000000000.0, 1000000000.0);
+    yMinSpin->setDecimals(current_unit_name() == "V" ? 6 : 3);
+    yMinSpin->setValue(m_manualYMin);
+
+    QDoubleSpinBox* yMaxSpin = new QDoubleSpinBox(&dialog);
+    yMaxSpin->setRange(-1000000000.0, 1000000000.0);
+    yMaxSpin->setDecimals(current_unit_name() == "V" ? 6 : 3);
+    yMaxSpin->setValue(m_manualYMax);
+
+    QCheckBox* show114Check = new QCheckBox(&dialog);
+    show114Check->setChecked(m_showChart114);
+
+    QCheckBox* show212Check = new QCheckBox(&dialog);
+    show212Check->setChecked(m_showChart212);
+
+    form->addRow("Автоокно X:", autoXCheck);
+    form->addRow("Окно X, тиков:", windowTicksSpin);
+    form->addRow("Автомасштаб Y:", autoYCheck);
+    form->addRow(QString("Y min, %1:").arg(current_unit_name()), yMinSpin);
+    form->addRow(QString("Y max, %1:").arg(current_unit_name()), yMaxSpin);
+    form->addRow("Показывать LTR114:", show114Check);
+    form->addRow("Показывать LTR212:", show212Check);
+
+    QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    form->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    if (yMinSpin->value() >= yMaxSpin->value()) {
+        QMessageBox::warning(this, "Настройки графиков", "Y min должен быть меньше Y max.");
+        return;
+    }
+
+    m_autoScaleX = autoXCheck->isChecked();
+    m_plotWindowTicks = windowTicksSpin->value();
+    m_autoScaleY = autoYCheck->isChecked();
+    m_manualYMin = yMinSpin->value();
+    m_manualYMax = yMaxSpin->value();
+    m_showChart114 = show114Check->isChecked();
+    m_showChart212 = show212Check->isChecked();
+
+    refresh_plot();
+}
+
+void MainWindow::update_ltr212_controls_state()
+{
+    const bool workerRunning = m_ltr212Thread && m_ltr212Thread->isRunning();
+    if (ltr212SettingsGroup)
+        ltr212SettingsGroup->setEnabled(!m_captureRunning && !workerRunning && m_ltr212Slot >= 0);
+}
+
+void MainWindow::update_ltr114_controls_state()
+{
+    if (!ltr114SettingsGroup)
+        return;
+
+    const bool workerRunning = m_ltr114Thread && m_ltr114Thread->isRunning();
+    ltr114SettingsGroup->setVisible(!m_simulationMode);
+    ltr114SettingsGroup->setEnabled(!m_captureRunning && !workerRunning && m_ltr114Slot >= 0);
+}
+
+void MainWindow::update_simulation_controls_state()
+{
+    if (!simulationSettingsGroup)
+        return;
+
+    const bool workerRunning = (m_ltr114Thread && m_ltr114Thread->isRunning())
+                               || (m_ltr212Thread && m_ltr212Thread->isRunning());
+    simulationSettingsGroup->setVisible(m_simulationMode);
+    simulationSettingsGroup->setEnabled(!m_captureRunning && !workerRunning && m_simulationMode);
+}
+
+void MainWindow::update_ltr212_channel_limit()
+{
+    if (!acqMode212Combo || !channelCount212Spin)
+        return;
+
+    const int acqMode = acqMode212Combo->currentData().toInt();
+    const int maxChannels = (acqMode == LTR212_EIGHT_CHANNELS_WITH_HIGH_RESOLUTION) ? 8 : 4;
+    const int currentValue = qMin(channelCount212Spin->value(), maxChannels);
+    channelCount212Spin->setMaximum(maxChannels);
+    channelCount212Spin->setValue(currentValue);
+}
+
+void MainWindow::set_capture_controls_enabled(bool enabled)
+{
+    const bool workerStillRunning = (m_ltr114Thread && m_ltr114Thread->isRunning())
+                                    || (m_ltr212Thread && m_ltr212Thread->isRunning());
+    const bool hasSupportedModule = m_simulationMode || m_ltr114Slot >= 0 || m_ltr212Slot >= 0;
+    const bool controlsEnabled = enabled && !workerStillRunning;
+
+    if (startButton)
+        startButton->setEnabled(controlsEnabled && hasSupportedModule);
+    if (stopButton)
+        stopButton->setEnabled(!enabled && !workerStillRunning);
+    if (commonSettingsGroup)
+        commonSettingsGroup->setEnabled(controlsEnabled);
+    if (sampleRateSpin)
+        sampleRateSpin->setEnabled(controlsEnabled);
+    if (plotEverySpin)
+        plotEverySpin->setEnabled(controlsEnabled);
+    if (chunkSizeSpin)
+        chunkSizeSpin->setEnabled(controlsEnabled);
+    if (saveToFileCheck)
+        saveToFileCheck->setEnabled(controlsEnabled);
+    if (unitCombo)
+        unitCombo->setEnabled(controlsEnabled);
+    update_ltr114_controls_state();
+    update_ltr212_controls_state();
+    update_simulation_controls_state();
+}
+
+bool MainWindow::open_capture_file(int moduleId)
+{
+    QFile*& targetFile = (moduleId == 1) ? m_captureFile212 : m_captureFile;
+    QTextStream*& targetStream = (moduleId == 1) ? m_captureStream212 : m_captureStream;
+    QString& targetPath = (moduleId == 1) ? m_captureFilePath212 : m_captureFilePath;
+    const QString moduleName = (moduleId == 1) ? "LTR212" : "LTR114";
+
+    if (targetFile)
+        return true;
+
+    targetPath = QString("ltr_capture_%1_%2.txt")
+                     .arg(moduleName.toLower())
+                     .arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss"));
+
+    targetFile = new QFile(targetPath);
+    if (!targetFile->open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        appendInfo(QString("Не удалось открыть файл %1 для записи").arg(targetPath), true);
+        delete targetFile;
+        targetFile = nullptr;
+        return false;
+    }
+
+    targetStream = new QTextStream(targetFile);
+    int rateHz = m_simulationMode && simulationRateSpin
+                     ? simulationRateSpin->value()
+                     : sampleRateSpin->value();
+    if (!m_simulationMode && moduleId == 0 && m_ltr114) {
+        rateHz = qMax(1, qRound(static_cast<double>(LTR114_FREQ(*m_ltr114->handle()))));
+    } else if (!m_simulationMode && moduleId == 1 && m_ltr212 && m_ltr212->handle()->Fs > 0.0) {
+        rateHz = qMax(1, qRound(m_ltr212->handle()->Fs));
+    }
+    quint64& sampleIndex = (moduleId == 1) ? m_captureSampleIndex212 : m_captureSampleIndex114;
+    sampleIndex = 0;
+
+    (*targetStream) << rateHz << "\t"
+                    << current_unit_name() << "\t"
+                    << moduleName << "\n";
+    targetStream->flush();
+    return true;
+}
+
+bool MainWindow::append_samples_to_file(const QVector<TimedSample>& samples, int moduleId)
+{
+    if (samples.isEmpty())
+        return true;
+
+    QFile*& targetFile = (moduleId == 1) ? m_captureFile212 : m_captureFile;
+    QTextStream*& targetStream = (moduleId == 1) ? m_captureStream212 : m_captureStream;
+
+    if (!open_capture_file(moduleId) || !targetStream || !targetFile)
+        return false;
+
+    const double factor = current_unit_factor();
+    quint64& sampleIndex = (moduleId == 1) ? m_captureSampleIndex212 : m_captureSampleIndex114;
+
+    for (const TimedSample& sample : samples) {
+        (*targetStream) << ++sampleIndex << "\t"
+                        << QString::number(sample.value * factor, 'g', 12) << "\n";
+    }
+
+    targetStream->flush();
+    return (targetStream->status() == QTextStream::Ok);
+}
+
+void MainWindow::close_capture_file(int moduleId)
+{
+    QTextStream*& targetStream = (moduleId == 1) ? m_captureStream212 : m_captureStream;
+    QFile*& targetFile = (moduleId == 1) ? m_captureFile212 : m_captureFile;
+    QString& targetPath = (moduleId == 1) ? m_captureFilePath212 : m_captureFilePath;
+
+    if (targetStream) {
+        targetStream->flush();
+        delete targetStream;
+        targetStream = nullptr;
+    }
+
+    if (targetFile) {
+        targetFile->close();
+        delete targetFile;
+        targetFile = nullptr;
+        if (!targetPath.isEmpty()) {
+            appendInfo(QString("Файл сохранён: %1").arg(targetPath));
+            targetPath.clear();
+        }
+    }
+}
+
+void MainWindow::close_capture_files()
+{
+    close_capture_file(0);
+    close_capture_file(1);
+}
+
+void MainWindow::setup_crate_sync()
+{
+    if (!m_crate || !m_crate->is_open()) {
+        appendInfo("Крейт не открыт — синхрометки не настроены", true);
+        return;
+    }
+
+    if (m_crate->start_second_marks()) {
+        appendInfo("Синхрометки SECOND настроены (START создаётся после готовности модулей)");
+    } else {
+        appendInfo("Ошибка настройки синхрометок на крейте", true);
+    }
+}
+
+void MainWindow::reset_sync_state(bool needSynchronization)
+{
+    QMutexLocker locker(&m_syncState.mutex);
+    m_syncState.needSynchronization = needSynchronization;
+    m_syncState.state = needSynchronization ? SyncSessionState::WaitingBaseline : SyncSessionState::Disabled;
+    m_syncState.sessionStartMsec = QDateTime::currentMSecsSinceEpoch();
+    m_syncState.startMarkRequested = false;
+    m_syncState.startMarkRequestMsec = 0;
+    m_syncState.baselineTimeoutMs = 5000;
+    m_syncState.startTimeoutMs = 5000;
+    m_syncState.failureMessage.clear();
+    m_syncState.ltr114 = {};
+    m_syncState.ltr212 = {};
+    m_syncState.timeBaseTicks = 1000000ULL;
+}
+
+bool MainWindow::start_configured_modules()
+{
+    if (m_usingLtr114 && m_ltr114 && !m_ltr114->start()) {
+        appendInfo("LTR114: failed to start acquisition.", true);
+        return false;
+    }
+
+    if (m_usingLtr212 && m_ltr212 && !m_ltr212->start()) {
+        appendInfo("LTR212: failed to start acquisition.", true);
+        return false;
+    }
+
+    return true;
+}
+
+void MainWindow::try_make_sync_start_mark()
+{
+    if (!m_captureRunning || !m_syncState.needSynchronization)
+        return;
+
+    bool shouldMakeStart = false;
+    {
+        QMutexLocker locker(&m_syncState.mutex);
+        if (m_syncState.state == SyncSessionState::WaitingBaseline
+            && m_syncState.ltr114.baselineSeen
+            && m_syncState.ltr212.baselineSeen
+            && !m_syncState.startMarkRequested) {
+            m_syncState.state = SyncSessionState::WaitingStartEdge;
+            m_syncState.startMarkRequested = true;
+            m_syncState.startMarkRequestMsec = QDateTime::currentMSecsSinceEpoch();
+            shouldMakeStart = true;
+        }
+    }
+
+    if (!shouldMakeStart)
+        return;
+
+    if (m_crate && m_crate->is_open() && m_crate->make_start_mark()) {
+        appendInfo("Sync START mark generated; workers are waiting for START edge.");
+        return;
+    }
+
+    {
+        QMutexLocker locker(&m_syncState.mutex);
+        m_syncState.state = SyncSessionState::Failed;
+        m_syncState.failureMessage = "Failed to generate START mark on crate.";
+    }
+    appendInfo("Failed to generate START mark on crate.", true);
+    QMetaObject::invokeMethod(this, "on_stop_capture_clicked", Qt::QueuedConnection);
+}
+
+void MainWindow::on_start_capture_clicked()
+{
+    if (m_captureRunning) return;
+
+    m_allSamples.clear();
+
+    m_virtualTick114 = 0;
+    m_virtualTick212 = 0;
+    m_plotCounter114 = 0;
+    m_plotCounter212 = 0;
+
+    m_plotPoints.clear();
+    m_plotPoints212.clear();
+    m_pendingFileSamples114.clear();
+    m_pendingFileSamples212.clear();
+    m_captureSampleIndex114 = 0;
+    m_captureSampleIndex212 = 0;
+    refresh_plot();
+
+    if (m_simulationMode) {
+        if (saveToFileCheck->isChecked()) {
+            if (!open_capture_file(0))
+                return;
+            if (m_simulateTwoModules && !open_capture_file(1)) {
+                close_capture_file(0);
+                return;
+            }
+        }
+
+        m_captureRunning = true;
+        m_simulatedSampleRate = qMax(1, simulationRateSpin ? simulationRateSpin->value() : sampleRateSpin->value());
+        m_simulatedSampleAccumulator = 0.0;
+        m_simulatedSampleAccumulator212 = 0.0;
+        m_simulatedSignalTick = 0;
+        m_simulatedSignalTick212 = 0;
+
+        set_capture_controls_enabled(false);
+
+        if (!m_simulationTimer) {
+            m_simulationTimer = new QTimer(this);
+            connect(m_simulationTimer, &QTimer::timeout, this, [this]() {
+                if (m_captureRunning && m_simulationMode) {
+                    process_voltage_samples(generate_simulated_samples(0), 0);
+                    if (m_simulateTwoModules) {
+                        process_voltage_samples(generate_simulated_samples(1), 1);
+                    }
+                }
+            });
+        }
+
+        m_usingLtr114 = false;
+        m_usingLtr212 = false;
+        update_plot_visibility();
+        m_simulationTimer->start(30);
+        appendInfo("Симуляция запущена через QTimer.");
+        return;
+    }
+
+    m_usingLtr114 = false;
+    m_usingLtr212 = false;
+
+    bool success = false;
+
+    if (m_ltr114Slot != -1) {
+        if (open_ltr114_for_capture()) {
+            m_usingLtr114 = true;
+            success = true;
+        }
+    }
+    if (m_ltr212Slot != -1) {
+        if (open_ltr212_for_capture()) {
+            m_usingLtr212 = true;
+            success = true;
+        }
+    }
+
+    if (!success) {
+        appendInfo("Ни LTR114, ни LTR212 не удалось запустить!", true);
+        close_capture_files();
+        return;
+    }
+
+    const bool needSynchronization = (m_usingLtr114 && m_usingLtr212);
+    reset_sync_state(needSynchronization);
+
+    if (needSynchronization) {
+        if (!m_crate || !m_crate->is_open()) {
+            appendInfo("Crate is not open; synchronized start is unavailable.", true);
+            close_ltr114_capture();
+            close_ltr212_capture();
+            return;
+        }
+
+        m_crate->stop_sync_marks();
+        if (!m_crate->start_second_marks()) {
+            appendInfo("Failed to start SECOND sync marks on crate.", true);
+            close_ltr114_capture();
+            close_ltr212_capture();
+            return;
+        }
+        appendInfo("SECOND sync marks started. Workers will request START after baseline tmark is seen.");
+    } else {
+        appendInfo("Single-module acquisition: inter-module synchronization is disabled.");
+    }
+
+    if (!start_configured_modules()) {
+        close_ltr114_capture();
+        close_ltr212_capture();
+        return;
+    }
+
+    if (saveToFileCheck->isChecked()) {
+        if (m_usingLtr114 && !open_capture_file(0)) {
+            close_ltr114_capture();
+            close_ltr212_capture();
+            return;
+        }
+        if (m_usingLtr212 && !open_capture_file(1)) {
+            close_ltr114_capture();
+            close_ltr212_capture();
+            close_capture_file(0);
+            return;
+        }
+    }
+
+    if (m_syncState.needSynchronization) {
+        appendInfo("Запущены оба модуля → включаем синхронизацию по tmark");
+    } else {
+        appendInfo("Работаем с одним модулем — синхронизация не требуется");
+    }
+
+    m_captureRunning = true;
+    set_capture_controls_enabled(false);
+    update_plot_visibility();
+
+    if (m_usingLtr114 && m_ltr114) {
+        m_ltr114Thread = new QThread(this);
+        m_ltr114Worker = new Ltr114Worker(m_ltr114.get(), &m_syncState);
+        m_ltr114Worker->moveToThread(m_ltr114Thread);
+
+        connect(m_ltr114Thread, &QThread::started, m_ltr114Worker, &Ltr114Worker::run);
+        connect(m_ltr114Worker, &Ltr114Worker::newVoltageSamples, this, [this](const QVector<TimedSample>& samples) {
+            if (!m_captureRunning)
+                return;
+            process_voltage_samples(samples, 0);
+        }, Qt::QueuedConnection);
+        connect(m_ltr114Worker, &Ltr114Worker::acquisitionError, this, [this](const QString& error) {
+            if (!m_captureRunning)
+                return;
+            appendInfo(error, true);
+            QMetaObject::invokeMethod(this, "on_stop_capture_clicked", Qt::QueuedConnection);
+        }, Qt::QueuedConnection);
+        connect(m_ltr114Worker, &Ltr114Worker::syncReadyForStart, this,
+                [this](int, quint32 start, quint32 second) {
+                    appendInfo(QString("LTR114 sync baseline: START=%1 SECOND=%2").arg(start).arg(second));
+                    try_make_sync_start_mark();
+                }, Qt::QueuedConnection);
+        connect(m_ltr114Worker, &Ltr114Worker::syncStarted, this,
+                [this](int, quint32 start, quint32 second, quint64 dropped) {
+                    appendInfo(QString("LTR114 sync START accepted: START=%1 SECOND=%2 dropped=%3")
+                                   .arg(start)
+                                   .arg(second)
+                                   .arg(dropped));
+                }, Qt::QueuedConnection);
+        connect(m_ltr114Worker, &Ltr114Worker::finished, m_ltr114Thread, &QThread::quit);
+
+        m_ltr114Thread->start();
+    }
+
+    if (m_usingLtr212 && m_ltr212) {
+        m_ltr212Thread = new QThread(this);
+        m_ltr212Worker = new Ltr212Worker(m_ltr212.get(), &m_syncState);
+        m_ltr212Worker->moveToThread(m_ltr212Thread);
+
+        connect(m_ltr212Thread, &QThread::started, m_ltr212Worker, &Ltr212Worker::run);
+        connect(m_ltr212Worker, &Ltr212Worker::newVoltageSamples, this, [this](const QVector<TimedSample>& samples) {
+            if (!m_captureRunning)
+                return;
+            process_voltage_samples(samples, 1);
+        }, Qt::QueuedConnection);
+        connect(m_ltr212Worker, &Ltr212Worker::acquisitionError, this, [this](const QString& error) {
+            if (!m_captureRunning)
+                return;
+            appendInfo(error, true);
+            QMetaObject::invokeMethod(this, "on_stop_capture_clicked", Qt::QueuedConnection);
+        }, Qt::QueuedConnection);
+        connect(m_ltr212Worker, &Ltr212Worker::syncReadyForStart, this,
+                [this](int, quint32 start, quint32 second) {
+                    appendInfo(QString("LTR212 sync baseline: START=%1 SECOND=%2").arg(start).arg(second));
+                    try_make_sync_start_mark();
+                }, Qt::QueuedConnection);
+        connect(m_ltr212Worker, &Ltr212Worker::syncStarted, this,
+                [this](int, quint32 start, quint32 second, quint64 dropped) {
+                    appendInfo(QString("LTR212 sync START accepted: START=%1 SECOND=%2 dropped=%3")
+                                   .arg(start)
+                                   .arg(second)
+                                   .arg(dropped));
+                }, Qt::QueuedConnection);
+        connect(m_ltr212Worker, &Ltr212Worker::finished, m_ltr212Thread, &QThread::quit);
+
+        m_ltr212Thread->start();
+    }
+}
+
+void MainWindow::on_stop_capture_clicked()
+{
+    if (!m_captureRunning) return;
+
+    m_captureRunning = false;
+    if (m_simulationTimer) {
+        m_simulationTimer->stop();
+    }
+
+    stop_worker_threads();
+    close_ltr114_capture();
+    close_ltr212_capture();
+
+    if (saveToFileCheck->isChecked()) {
+        if (!append_samples_to_file(m_pendingFileSamples114, 0)) {
+            appendInfo("Ошибка дозаписи данных в файл.", true);
+        }
+        if (!append_samples_to_file(m_pendingFileSamples212, 1)) {
+            appendInfo("Ошибка дозаписи данных в файл LTR212.", true);
+        }
+        m_pendingFileSamples114.clear();
+        m_pendingFileSamples212.clear();
+        close_capture_files();
+    } else {
+        m_pendingFileSamples114.clear();
+        m_pendingFileSamples212.clear();
+        appendInfo("Сохранение файла отключено пользователем.");
+    }
+
+    if (m_crate && m_crate->is_open()) {
+        m_crate->stop_sync_marks();
+        appendInfo("Синхрометки остановлены");
+    }
+
+    set_capture_controls_enabled(true);
+    update_plot_visibility();
+
+    appendInfo("Сбор остановлен пользователем.");
+}
+
+// ДЛЯ GLOBALTICK ВНУТРИ ГРАФИКА
+// void MainWindow::process_voltage_samples(const QVector<TimedSample>& voltageSamples, int moduleId)
+// {
+//     if (voltageSamples.isEmpty()) return;
+
+//     QVector<QPointF>& modulePlotPoints = (moduleId == 1) ? m_plotPoints212 : m_plotPoints;
+//     QVector<TimedSample>& modulePendingFileSamples = (moduleId == 1) ? m_pendingFileSamples212 : m_pendingFileSamples114;
+
+//     const int everyN = qMax(1, plotEverySpin->value());
+
+//     for (const TimedSample& sample : voltageSamples) {
+//         m_allSamples.append(sample);
+//         modulePendingFileSamples.append(sample);
+
+//         // === УСТАНАВЛИВАЕМ ТОЧКУ ОТСЧЁТА ===
+//         if (m_startGlobalTick == 0) {
+//             m_startGlobalTick = sample.globalTick;
+//         }
+
+//         // === РЕАЛЬНОЕ ВРЕМЯ В СЕКУНДАХ (для графика) ===
+//         double timeSec = (sample.globalTick - m_startGlobalTick) / 1000000.0;
+
+//         if (moduleId == 0) m_plotCounter114++;
+//         else               m_plotCounter212++;
+
+//         quint64& plotCounter = (moduleId == 1) ? m_plotCounter212 : m_plotCounter114;
+
+//         if (plotCounter % static_cast<quint64>(everyN) == 0) {
+//             modulePlotPoints.append(QPointF(timeSec, sample.value));
+//         }
+//     }
+
+//     // Ограничение количества точек
+//     if (modulePlotPoints.size() > MAX_PLOT_POINTS) {
+//         modulePlotPoints.remove(0, modulePlotPoints.size() - MAX_PLOT_POINTS);
+//     }
+
+//     // Запись в файл (как было)
+//     if (saveToFileCheck->isChecked() && !modulePendingFileSamples.isEmpty()) {
+//         const int flushEvery = qMax(1, sampleRateSpin->value());
+//         if (modulePendingFileSamples.size() >= flushEvery) {
+//             append_samples_to_file(modulePendingFileSamples, moduleId);
+//             modulePendingFileSamples.clear();
+//         }
+//     }
+
+//     refresh_plot();
+// }
+
+void MainWindow::process_voltage_samples(const QVector<TimedSample>& voltageSamples, int moduleId)
+{
+    if (voltageSamples.isEmpty())
+        return;
+
+    const int everyN = qMax(1, plotEverySpin->value());
+    QVector<QPointF>& modulePlotPoints = (moduleId == 1) ? m_plotPoints212 : m_plotPoints;
+    QVector<TimedSample>& modulePendingFileSamples = (moduleId == 1) ? m_pendingFileSamples212 : m_pendingFileSamples114;
+
+    quint64& plotCounter = (moduleId == 1) ? m_plotCounter212 : m_plotCounter114;
+
+    for (const TimedSample& sample : voltageSamples) {
+        m_allSamples.append(sample);
+        modulePendingFileSamples.append(sample);
+
+        // === ВИРТУАЛЬНЫЙ ТИК ДЛЯ ГРАФИКА ===
+        quint64& virtualTick = (moduleId == 1) ? m_virtualTick212 : m_virtualTick114;
+        virtualTick++;
+        plotCounter++;
+
+        if (plotCounter % static_cast<quint64>(everyN) == 0) {
+            modulePlotPoints.append(QPointF(static_cast<qreal>(virtualTick), sample.value));
+        }
+    }
+
+    // Ограничение количества точек (чтобы не перегружать QtCharts)
+    if (modulePlotPoints.size() > MAX_PLOT_POINTS) {
+        modulePlotPoints.remove(0, modulePlotPoints.size() - MAX_PLOT_POINTS);
+    }
+
+    // Запись в файл (оставляем как было)
+    if (saveToFileCheck->isChecked() && !modulePendingFileSamples.isEmpty()) {
+        const int rateHz = m_simulationMode && simulationRateSpin
+                               ? simulationRateSpin->value()
+                               : sampleRateSpin->value();
+        const int flushEverySamples = qMax(1, rateHz);
+        if (modulePendingFileSamples.size() >= flushEverySamples) {
+            if (!append_samples_to_file(modulePendingFileSamples, moduleId)) {
+                appendInfo("Ошибка записи в файл во время сбора.", true);
+            }
+            modulePendingFileSamples.clear();
+        }
+    }
+
+    refresh_plot();
+}
+
+QVector<TimedSample> MainWindow::generate_simulated_samples(int moduleId)
+{
+    QVector<TimedSample> samples;
+    const double sampleRate = static_cast<double>(qMax(1, m_simulatedSampleRate));
+    const double timerPeriodSec = 0.03;
+    double& accumulator = (moduleId == 1) ? m_simulatedSampleAccumulator212 : m_simulatedSampleAccumulator;
+    quint64& signalTick = (moduleId == 1) ? m_simulatedSignalTick212 : m_simulatedSignalTick;
+
+    accumulator += sampleRate * timerPeriodSec;
+    int samplesToGenerate = static_cast<int>(accumulator);
+    accumulator -= samplesToGenerate;
+
+    if (samplesToGenerate <= 0)
+        return samples;
+
+    samples.reserve(samplesToGenerate);
+
+    const quint64 ticksPerSample = 1000000ULL / static_cast<quint64>(sampleRate); // микросекунды на семпл
+    const double dt = 1.0 / sampleRate;
+
+    // твои параметры сигнала (оставь как было)
+    const double freq1 = (moduleId == 1) ? qMin(7.0, sampleRate / 17.0) : qMin(5.0, sampleRate / 20.0);
+    const double freq2 = (moduleId == 1) ? qMin(11.0, sampleRate / 10.0) : qMin(13.0, sampleRate / 12.0);
+    const double amp1 = (moduleId == 1) ? 0.00095 : 0.0012;
+    const double amp2 = (moduleId == 1) ? 0.00060 : 0.00045;
+    const double amp3 = (moduleId == 1) ? 0.00022 : 0.00015;
+    const double phase2 = (moduleId == 1) ? 1.4 : 0.8;
+    const double slowFreq = (moduleId == 1) ? 0.55 : 0.35;
+    constexpr double pi = 3.14159265358979323846;
+
+    for (int i = 0; i < samplesToGenerate; ++i) {
+        const double t = (static_cast<double>(signalTick) + static_cast<double>(i)) * dt;
+        const double signal = amp1 * std::sin(2.0 * pi * freq1 * t)
+                              + amp2 * std::sin(2.0 * pi * freq2 * t + phase2)
+                              + amp3 * std::sin(2.0 * pi * slowFreq * t);
+
+        TimedSample s{};
+        s.globalTick     = signalTick * ticksPerSample + static_cast<quint64>(i) * ticksPerSample;
+        s.secondMark     = static_cast<quint32>(signalTick / static_cast<quint64>(sampleRate));
+        s.sampleInSecond = static_cast<quint32>(signalTick % static_cast<quint64>(sampleRate));
+        s.value          = signal;
+
+        samples.append(s);
+        ++signalTick;                     // ← важно!
+    }
+
+    return samples;
+}
+
+void MainWindow::init_ltr()
+{
+    appendInfo("Начало поиска крейтов...");
+
+    auto crates = Crate::enumerate_crates();
+    if (crates.isEmpty()) {
+        m_simulationMode = true;
+        m_crateSerial = "SIMULATED_CRATE";
+        m_ltr114Slot = 1;
+
+        appendInfo("Нет подключенных крейтов. Включен режим симуляции.", true);
+
+        QWidget* w = createModuleItemWidget(1, "LTR114 (SIM)", true);
+        QListWidgetItem* it = new QListWidgetItem(modulesList);
+        it->setSizeHint(w->sizeHint());
+        modulesList->addItem(it);
+        modulesList->setItemWidget(it, w);
+        moduleWidgets.insert(1, w);
+
+        appendInfo("Симулированный крейт создан, модуль LTR114 виртуально доступен в слоте 1.");
+        run_ltr114_module(m_crateSerial, m_ltr114Slot);
+        update_ltr114_controls_state();
+        update_ltr212_controls_state();
+        update_simulation_controls_state();
+        update_plot_visibility();
+        return;
+    }
+
+    appendInfo(QString("Найдено %1 крейт(ов):").arg(crates.size()));
+    for (const auto& s : crates) appendInfo(QString("  %1").arg(s));
+
+    QString crate_sn = crates.first();
+    m_crateSerial = crate_sn;
+    appendInfo(QString("Открываем крейт SN: %1").arg(crate_sn));
+
+    m_crate = std::make_unique<Crate>(crate_sn);
+    if (!m_crate->is_open()) {
+        appendInfo("Соединение с крейтом оставлено открытым для синхрометок", true);
+        // m_crate.reset();
+        startButton->setEnabled(false);
+        update_ltr114_controls_state();
+        update_ltr212_controls_state();
+        update_simulation_controls_state();
+        update_plot_visibility();
+        return;
+    }
+    appendInfo("Крейт успешно открыт.");
+
+    auto modules = m_crate->get_modules();
+    if (modules.isEmpty()) {
+        appendInfo("В крейте нет модулей", true);
+        startButton->setEnabled(false);
+        update_ltr114_controls_state();
+        update_ltr212_controls_state();
+        update_simulation_controls_state();
+        update_plot_visibility();
+        return;
+    }
+
+    WORD slot_count = m_crate->get_slot_count();
+    appendInfo(QString("Вместимость крейта: %1 слотов").arg(slot_count));
+
+    for (int s = 1; s <= slot_count; ++s) {
+        QWidget* w = createModuleItemWidget(s, "EMPTY", false);
+        QListWidgetItem* it = new QListWidgetItem(modulesList);
+        it->setSizeHint(w->sizeHint());
+        modulesList->addItem(it);
+        modulesList->setItemWidget(it, w);
+        moduleWidgets.insert(s, w);
+    }
+
+    appendInfo("Список модулей в крейте:");
+    for (const auto& mod : modules) {
+        int slot = mod.first;
+        WORD mid = mod.second;
+        QString name = module_name(mid);
+        appendInfo(QString("  слот %1: %2").arg(slot).arg(name));
+
+        QWidget* w = moduleWidgets.value(slot, nullptr);
+        if (w) {
+            QWidget* new_w = createModuleItemWidget(slot, name, true);
+            QListWidgetItem* item = modulesList->item(slot - 1);
+            if (item) {
+                modulesList->setItemWidget(item, new_w);
+                moduleWidgets[slot] = new_w;
+            }
+        }
+    }
+
+    int ltr114_slot = -1;
+    for (const auto& mod : modules) {
+        if (mod.second == LTR_MID_LTR114 && ltr114_slot == -1)
+            ltr114_slot = mod.first;
+    }
+
+    if (ltr114_slot != -1) {
+        appendInfo(QString("LTR114 IN SLOT %1").arg(ltr114_slot));
+        run_ltr114_module(crate_sn, ltr114_slot);
+    } else {
+        appendInfo("LTR114 не найден. Можно работать с LTR212, если он доступен.", false);
+    }
+
+    int ltr212_slot = -1;
+    for (const auto& mod : modules) {
+        if (mod.second == LTR_MID_LTR212 && ltr212_slot == -1)
+            ltr212_slot = mod.first;
+    }
+
+    if (ltr212_slot != -1) {
+        appendInfo(QString("LTR212 найден в слоте %1").arg(ltr212_slot));
+        run_ltr212_module(crate_sn, ltr212_slot);
+    }
+
+    const bool hasSupportedModule = (ltr114_slot != -1) || (ltr212_slot != -1);
+    startButton->setEnabled(hasSupportedModule);
+    if (!hasSupportedModule) {
+        appendInfo("Не найдено поддерживаемых модулей LTR114/LTR212.", true);
+    }
+    update_ltr114_controls_state();
+    update_ltr212_controls_state();
+    update_simulation_controls_state();
+    update_plot_visibility();
+
+    appendInfo("Поиск модулей завершён. Соединение с крейтом оставлено открытым для синхрометок.");
+}
+
+
+void MainWindow::stop_worker_threads()
+{
+    if (m_ltr114Worker) {
+        QMetaObject::invokeMethod(m_ltr114Worker, "stopAcquisition", Qt::DirectConnection);
+    }
+    if (m_ltr212Worker) {
+        QMetaObject::invokeMethod(m_ltr212Worker, "stopAcquisition", Qt::DirectConnection);
+    }
+
+    if (m_ltr114)
+        m_ltr114->stop();
+    if (m_ltr212)
+        m_ltr212->stop();
+
+    constexpr unsigned long waitTimeoutMs = 5000;
+
+    if (m_ltr114Thread) {
+        m_ltr114Thread->quit();
+        if (m_ltr114Thread->wait(waitTimeoutMs)) {
+            delete m_ltr114Worker;
+            m_ltr114Worker = nullptr;
+            delete m_ltr114Thread;
+            m_ltr114Thread = nullptr;
+        } else {
+            appendInfo("LTR114: поток не завершился за 5 секунд; модуль оставлен открытым.", true);
+            m_ltr114Thread->setParent(nullptr);
+            if (m_ltr114)
+                static_cast<void>(m_ltr114.release());
+        }
+    }
+
+    if (m_ltr212Thread) {
+        m_ltr212Thread->quit();
+        if (m_ltr212Thread->wait(waitTimeoutMs)) {
+            delete m_ltr212Worker;
+            m_ltr212Worker = nullptr;
+            delete m_ltr212Thread;
+            m_ltr212Thread = nullptr;
+        } else {
+            appendInfo("LTR212: поток не завершился за 5 секунд; модуль оставлен открытым.", true);
+            m_ltr212Thread->setParent(nullptr);
+            if (m_ltr212)
+                static_cast<void>(m_ltr212.release());
+        }
+    }
+}
