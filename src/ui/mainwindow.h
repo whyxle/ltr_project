@@ -18,14 +18,13 @@
 #include "LTR/ltr114api.h"
 #include "LTR/ltr212api.h"
 
-#include "crate.h"
-#include "ltr11.h"
-#include "ltr114.h"
-#include "ltr212.h"
-#include "ltr_workers.h"
-#include "measurement_writer.h"
+#include "ltr/crate.h"
+#include "ltr/ltr11.h"
+#include "ltr/ltr114.h"
+#include "ltr/ltr212.h"
+#include "acquisition/ltr_workers.h"
+#include "io/measurement_writer.h"
 
-#include "crate.h"
 #include <memory>
 
 #include <QtCharts/QChart>

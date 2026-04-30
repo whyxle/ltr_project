@@ -3,34 +3,35 @@ QT += core gui widgets charts
 CONFIG += c++17
 
 SOURCES += \
-    crate.cpp \
-    ltr11.cpp \
-    ltr114.cpp \
-    ltr212.cpp \
-    ltr_result.cpp \
-    ltr_workers.cpp \
-    main.cpp \
-    mainwindow.cpp \
-    measurement_writer.cpp \
-    sync_timeline.cpp
+    src/app/main.cpp \
+    src/ui/mainwindow.cpp \
+    src/ltr/crate.cpp \
+    src/ltr/ltr11.cpp \
+    src/ltr/ltr114.cpp \
+    src/ltr/ltr212.cpp \
+    src/ltr/ltr_result.cpp \
+    src/ltr/module.cpp \
+    src/acquisition/ltr_workers.cpp \
+    src/acquisition/sync_timeline.cpp \
+    src/io/measurement_writer.cpp
 
 HEADERS += \
-    crate.h \
-    ltr11.h \
-    ltr114.h \
-    ltr212.h \
-    ltr_result.h \
-    ltr_workers.h \
-    mainwindow.h \
-    measurement_writer.h \
-    module.h \
-    sync_timeline.h
+    src/ui/mainwindow.h \
+    src/ltr/crate.h \
+    src/ltr/ltr11.h \
+    src/ltr/ltr114.h \
+    src/ltr/ltr212.h \
+    src/ltr/ltr_result.h \
+    src/ltr/module.h \
+    src/acquisition/ltr_workers.h \
+    src/acquisition/sync_timeline.h \
+    src/io/measurement_writer.h
 
 
-FORMS += mainwindow.ui
+FORMS += src/ui/mainwindow.ui
 
 # Пути к ltrapi.dll и .a (на MinGW)
-INCLUDEPATH += $$PWD/LTR
+INCLUDEPATH += $$PWD $$PWD/src $$PWD/LTR
 
 LIBS += $$PWD/LTR/libltrapi.a \
         $$PWD/LTR/libltr11api.a \

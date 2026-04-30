@@ -28,4 +28,4 @@ release/
 ltr_capture_*.txt
 
 # External LTR SDK/API files are expected to be installed or copied locally.
-LTR/
+/LTR/

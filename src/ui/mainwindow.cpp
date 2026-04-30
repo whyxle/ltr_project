@@ -28,9 +28,9 @@
 #include <algorithm>
 #include <cmath>
 
-#include "ltr11.h"
-#include "ltr114.h"
-#include "ltr_result.h"
+#include "ltr/ltr11.h"
+#include "ltr/ltr114.h"
+#include "ltr/ltr_result.h"
 
 QString MainWindow::module_name(WORD mid)
 {

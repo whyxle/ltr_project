@@ -4,13 +4,13 @@ CONFIG += c++17 console testcase
 TEMPLATE = app
 TARGET = reliability_tests
 
-INCLUDEPATH += ..
+INCLUDEPATH += .. ../src
 
 SOURCES += \
     reliability_tests.cpp \
-    ../measurement_writer.cpp \
-    ../sync_timeline.cpp
+    ../src/io/measurement_writer.cpp \
+    ../src/acquisition/sync_timeline.cpp
 
 HEADERS += \
-    ../measurement_writer.h \
-    ../sync_timeline.h
+    ../src/io/measurement_writer.h \
+    ../src/acquisition/sync_timeline.h

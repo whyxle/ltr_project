@@ -6,7 +6,7 @@
 #include <QTextStream>
 #include <QVector>
 
-#include "sync_timeline.h"
+#include "acquisition/sync_timeline.h"
 
 class MeasurementWriter
 {

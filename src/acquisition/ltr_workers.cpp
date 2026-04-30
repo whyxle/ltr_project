@@ -4,9 +4,9 @@
 #include <algorithm>
 #include <utility>
 
-#include "ltr114.h"
-#include "ltr212.h"
-#include "ltr_result.h"
+#include "ltr/ltr114.h"
+#include "ltr/ltr212.h"
+#include "ltr/ltr_result.h"
 
 namespace {
 constexpr DWORD kRecvTimeoutMs = 50;

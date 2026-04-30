@@ -4,8 +4,8 @@
 #include <QTemporaryDir>
 #include <QTextStream>
 
-#include "../measurement_writer.h"
-#include "../sync_timeline.h"
+#include "io/measurement_writer.h"
+#include "acquisition/sync_timeline.h"
 
 namespace {
 
