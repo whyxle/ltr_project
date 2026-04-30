@@ -2,6 +2,7 @@
 #define LTR11_H
 
 #include "module.h"
+#include "ltr_result.h"
 #include "LTR/ltr11api.h"
 
 class LTR11 : public Module
@@ -28,11 +29,13 @@ public:
     QString module_serial() const { return QString::fromLatin1(m_handle.ModuleInfo.Serial); }
     int firmware_version() const { return m_handle.ModuleInfo.Ver; }
     double channel_rate() const { return m_handle.ChRate; }
+    LtrResult last_result() const { return m_lastResult; }
 
     TLTR11* handle() { return &m_handle; }
 
 private:
     TLTR11 m_handle;
+    LtrResult m_lastResult;
     bool m_is_open;
     QString m_crateSn;
     int m_slot;

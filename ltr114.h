@@ -2,6 +2,7 @@
 #define LTR114_H
 
 #include "module.h"
+#include "ltr_result.h"
 #include "LTR/ltr114api.h"
 
 class LTR114 : public Module
@@ -29,11 +30,13 @@ public:
 
     QString module_name() const { return QString::fromLatin1(m_handle.ModuleInfo.Name); }
     QString module_serial() const { return QString::fromLatin1(m_handle.ModuleInfo.Serial); }
+    LtrResult last_result() const { return m_lastResult; }
 
     TLTR114* handle() { return &m_handle; }
 
 private:
     TLTR114 m_handle;
+    LtrResult m_lastResult;
     bool m_is_open;
     int m_slot;
 };

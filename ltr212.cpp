@@ -23,23 +23,29 @@ bool LTR212::open(const QString& crate_sn, int slot, const QString& bios)
 {
     if (m_is_open) close();
 
-    if (LTR212_Init(&m_handle) != LTR_OK)
+    INT result = LTR212_Init(&m_handle);
+    if (result != LTR_OK) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_Init", result);
         return false;
+    }
 
     QByteArray sn_bytes = crate_sn.toLatin1();
-    INT result = LTR212_Open(&m_handle, SADDR_DEFAULT, SPORT_DEFAULT,
-                             sn_bytes.constData(), slot, bios.toLatin1().constData());
+    result = LTR212_Open(&m_handle, SADDR_DEFAULT, SPORT_DEFAULT,
+                         sn_bytes.constData(), slot, bios.toLatin1().constData());
 
     if (result == LTR_WARNING_MODULE_IN_USE)
         result = LTR_OK;
 
-    if (result != LTR_OK)
+    if (result != LTR_OK) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_Open", result);
         return false;
+    }
 
     m_slot = slot;
     m_is_open = true;
 
     set_size();
+    m_lastResult = make_ltr_success("LTR212_Open");
     return true;
 }
 
@@ -53,20 +59,40 @@ void LTR212::close()
 
 bool LTR212::apply_config()
 {
-    if (!m_is_open)
+    if (!m_is_open) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_SetADC", LTR_ERROR_CHANNEL_CLOSED);
         return false;
+    }
 
-    return LTR212_SetADC(&m_handle) == LTR_OK;   // или LTR212_SetConfig — проверь в ltr212api.h
+    const INT result = LTR212_SetADC(&m_handle);
+    m_lastResult = result == LTR_OK
+                       ? make_ltr_success("LTR212_SetADC")
+                       : make_ltr_result(LtrApiModule::Ltr212, "LTR212_SetADC", result);
+    return result == LTR_OK;
 }
 
 bool LTR212::start()
 {
-    return m_is_open && (LTR212_Start(&m_handle) == LTR_OK);
+    if (!m_is_open) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_Start", LTR_ERROR_CHANNEL_CLOSED);
+        return false;
+    }
+    const INT result = LTR212_Start(&m_handle);
+    m_lastResult = result == LTR_OK
+                       ? make_ltr_success("LTR212_Start")
+                       : make_ltr_result(LtrApiModule::Ltr212, "LTR212_Start", result);
+    return result == LTR_OK;
 }
 
 bool LTR212::stop()
 {
-    return m_is_open && (LTR212_Stop(&m_handle) == LTR_OK);
+    if (!m_is_open)
+        return true;
+    const INT result = LTR212_Stop(&m_handle);
+    m_lastResult = result == LTR_OK
+                       ? make_ltr_success("LTR212_Stop")
+                       : make_ltr_result(LtrApiModule::Ltr212, "LTR212_Stop", result);
+    return result == LTR_OK;
 }
 
 QVector<DWORD> LTR212::receive_data(DWORD timeout, int* error_code)
@@ -76,6 +102,7 @@ QVector<DWORD> LTR212::receive_data(DWORD timeout, int* error_code)
     if (!m_is_open) {
         if (error_code)
             *error_code = -1;
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_Recv", LTR_ERROR_CHANNEL_CLOSED);
         return data;
     }
 
@@ -87,6 +114,7 @@ QVector<DWORD> LTR212::receive_data(DWORD timeout, int* error_code)
     if (recv_result < 0) {
         if (error_code)
             *error_code = recv_result;
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_Recv", recv_result);
         data.clear();
         return data;
     }
@@ -95,6 +123,7 @@ QVector<DWORD> LTR212::receive_data(DWORD timeout, int* error_code)
 
     if (error_code)
         *error_code = 0;
+    m_lastResult = make_ltr_success("LTR212_Recv");
 
     return data;
 }
@@ -139,9 +168,13 @@ void LTR212::set_size()
     m_handle.size = sizeof(TLTR212);
 }
 
-QVector<double> LTR212::process_data(const QVector<DWORD>& src, bool to_volts)
+QVector<double> LTR212::process_data(const QVector<DWORD>& src, bool to_volts, int* error_code)
 {
     if (!m_is_open || src.isEmpty()) {
+        if (error_code)
+            *error_code = m_is_open ? LTR_OK : LTR_ERROR_CHANNEL_CLOSED;
+        if (!m_is_open)
+            m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_ProcessData", LTR_ERROR_CHANNEL_CLOSED);
         return {};
     }
 
@@ -156,11 +189,16 @@ QVector<double> LTR212::process_data(const QVector<DWORD>& src, bool to_volts)
                                  to_volts ? 1 : 0);
 
     if (err != LTR_OK) {
-        qDebug() << "LTR212_ProcessData error:" << err;
-        // Если есть LTR212_GetErrorString(err) — можно вывести строку ошибки
+        if (error_code)
+            *error_code = err;
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_ProcessData", err);
+        return {};
     }
 
     dest.resize(static_cast<int>(proc_size));
+    if (error_code)
+        *error_code = LTR_OK;
+    m_lastResult = make_ltr_success("LTR212_ProcessData");
     return dest;
 }
 
@@ -171,6 +209,7 @@ QPair<QVector<DWORD>, QVector<DWORD>> LTR212::receive_data_with_marks(DWORD time
 
     if (!m_is_open) {
         if (error_code) *error_code = -1;
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_Recv", LTR_ERROR_CHANNEL_CLOSED);
         return {data, tmark};
     }
 
@@ -182,6 +221,7 @@ QPair<QVector<DWORD>, QVector<DWORD>> LTR212::receive_data_with_marks(DWORD time
 
     if (recv_result < 0) {
         if (error_code) *error_code = recv_result;
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_Recv", recv_result);
         return {{}, {}};
     }
 
@@ -189,10 +229,16 @@ QPair<QVector<DWORD>, QVector<DWORD>> LTR212::receive_data_with_marks(DWORD time
     tmark.resize(recv_result);
 
     if (error_code) *error_code = 0;
+    m_lastResult = make_ltr_success("LTR212_Recv");
     return {data, tmark};
 }
 
 bool LTR212::get_config()
 {
-    return m_is_open;   // get_config нет для ltr212
+    if (!m_is_open) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr212, "LTR212_GetConfig", LTR_ERROR_CHANNEL_CLOSED);
+        return false;
+    }
+    m_lastResult = make_ltr_success("LTR212_GetConfig");
+    return true;   // get_config нет для ltr212
 }

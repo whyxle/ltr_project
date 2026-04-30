@@ -7,26 +7,24 @@ SOURCES += \
     ltr11.cpp \
     ltr114.cpp \
     ltr212.cpp \
+    ltr_result.cpp \
     ltr_workers.cpp \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    measurement_writer.cpp \
+    sync_timeline.cpp
 
 HEADERS += \
     crate.h \
     ltr11.h \
     ltr114.h \
     ltr212.h \
+    ltr_result.h \
     ltr_workers.h \
     mainwindow.h \
-    $$PWD/LTR/ltrapi.h \
-    $$PWD/LTR/ltrapidefine.h \
-    $$PWD/LTR/ltrapitypes.h \
-    $$PWD/LTR/lwintypes.h \
-    $$PWD/LTR/ltrapi_config.h \
-    $$PWD/LTR/ltr11api.h \
-    $$PWD/LTR/ltr114api.h \
-    $$PWD/LTR/ltr212api.h \
-    module.h
+    measurement_writer.h \
+    module.h \
+    sync_timeline.h
 
 
 FORMS += mainwindow.ui

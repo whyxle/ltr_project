@@ -19,16 +19,23 @@ bool LTR11::open(const QString& crateSn, int slot)
 {
     if (m_is_open) close();
 
-    if (LTR11_Init(&m_handle) != LTR_OK)
+    INT result = LTR11_Init(&m_handle);
+    if (result != LTR_OK) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR11_Init", result);
         return false;
+    }
 
     QByteArray snBytes = crateSn.toLatin1();
-    if (LTR11_Open(&m_handle, SADDR_DEFAULT, SPORT_DEFAULT, snBytes.constData(), slot) != LTR_OK)
+    result = LTR11_Open(&m_handle, SADDR_DEFAULT, SPORT_DEFAULT, snBytes.constData(), slot);
+    if (result != LTR_OK) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR11_Open", result);
         return false;
+    }
 
     m_crateSn = crateSn;
     m_slot = slot;
     m_is_open = true;
+    m_lastResult = make_ltr_success("LTR11_Open");
     return true;
 }
 
@@ -42,18 +49,30 @@ void LTR11::close()
 
 bool LTR11::get_config()
 {
-    return m_is_open && (LTR11_GetConfig(&m_handle) == LTR_OK);
+    if (!m_is_open) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR11_GetConfig", LTR_ERROR_CHANNEL_CLOSED);
+        return false;
+    }
+    const INT result = LTR11_GetConfig(&m_handle);
+    m_lastResult = result == LTR_OK
+                       ? make_ltr_success("LTR11_GetConfig")
+                       : make_ltr_result(LtrApiModule::Ltr11, "LTR11_GetConfig", result);
+    return result == LTR_OK;
 }
 
 bool LTR11::apply_config()
 {
-    if (!m_is_open) return false;
+    if (!m_is_open) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR11_SetADC", LTR_ERROR_CHANNEL_CLOSED);
+        return false;
+    }
     // Здесь можно применить различные настройки, но для простоты используем LTR11_SetADC
     int rc = LTR11_SetADC(&m_handle);
     if (rc != LTR_OK) {
-        qDebug() << "LTR11_SetADC failed:" << rc;
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR11_SetADC", rc);
         return false;
     }
+    m_lastResult = make_ltr_success("LTR11_SetADC");
     return true;
 }
 
@@ -61,12 +80,26 @@ bool LTR11::apply_config()
 
 bool LTR11::start()
 {
-    return m_is_open && (LTR11_Start(&m_handle) == LTR_OK);
+    if (!m_is_open) {
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR11_Start", LTR_ERROR_CHANNEL_CLOSED);
+        return false;
+    }
+    const INT result = LTR11_Start(&m_handle);
+    m_lastResult = result == LTR_OK
+                       ? make_ltr_success("LTR11_Start")
+                       : make_ltr_result(LtrApiModule::Ltr11, "LTR11_Start", result);
+    return result == LTR_OK;
 }
 
 bool LTR11::stop()
 {
-    return m_is_open && (LTR11_Stop(&m_handle) == LTR_OK);
+    if (!m_is_open)
+        return true;
+    const INT result = LTR11_Stop(&m_handle);
+    m_lastResult = result == LTR_OK
+                       ? make_ltr_success("LTR11_Stop")
+                       : make_ltr_result(LtrApiModule::Ltr11, "LTR11_Stop", result);
+    return result == LTR_OK;
 }
 
 QVector<DWORD> LTR11::receive_data(DWORD timeout, int* errorCode)
@@ -74,6 +107,7 @@ QVector<DWORD> LTR11::receive_data(DWORD timeout, int* errorCode)
     QVector<DWORD> data;
     if (!m_is_open) {
         if (errorCode) *errorCode = -1;
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR_Recv", LTR_ERROR_CHANNEL_CLOSED);
         return data;
     }
 
@@ -82,12 +116,14 @@ QVector<DWORD> LTR11::receive_data(DWORD timeout, int* errorCode)
     INT received = LTR_Recv(&m_handle.Channel, buffer, nullptr, data_size, timeout);
     if (received < 0) {
         if (errorCode) *errorCode = received;
+        m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR_Recv", received);
         return data;
     }
 
     data.resize(received);
     std::memcpy(data.data(), buffer, received * sizeof(DWORD));
     if (errorCode) *errorCode = 0;
+    m_lastResult = make_ltr_success("LTR_Recv");
     return data;
 }
 

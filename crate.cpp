@@ -39,7 +39,9 @@ Crate::Crate(const QString& serial_number)
     , m_hcrate(nullptr)
 {
     m_hcrate = new TLTR;
-    if (LTR_Init(m_hcrate) != 0) {
+    INT result = LTR_Init(m_hcrate);
+    if (result != LTR_OK) {
+        m_lastResult = make_ltr_result(LtrApiModule::Common, "LTR_Init", result);
         delete m_hcrate;
         m_hcrate = nullptr;
         return;
@@ -52,11 +54,16 @@ Crate::Crate(const QString& serial_number)
     std::memcpy(m_hcrate->csn, snBytes.constData(), qMin(snBytes.size(), LTR_CRATE_SERIAL_SIZE - 1));
     m_hcrate->cc = LTR_CC_CHNUM_CONTROL;
 
-    if (LTR_Open(m_hcrate) != LTR_OK) {
+    result = LTR_Open(m_hcrate);
+    if (result != LTR_OK) {
+        m_lastResult = make_ltr_result(LtrApiModule::Common, "LTR_Open(crate control)", result);
         LTR_Close(m_hcrate);
         delete m_hcrate;
         m_hcrate = nullptr;
+        return;
     }
+
+    m_lastResult = make_ltr_success("LTR_Open(crate control)");
 }
 
 Crate::~Crate()
@@ -131,31 +138,39 @@ std::unique_ptr<Module> Crate::create_module(int slot) const
 bool Crate::start_second_marks()
 {
     if (!m_hcrate) {
-        qDebug() << "Crate::start_second_marks: no crate connection";
+        m_lastResult = make_ltr_result(LtrApiModule::Common, "LTR_StartSecondMark", LTR_ERROR_CHANNEL_CLOSED);
+        qDebug() << m_lastResult.message;
         return false;
     }
 
     LTR_StopSecondMark(m_hcrate);
-    if (LTR_StartSecondMark(m_hcrate, LTR_MARK_INTERNAL) != LTR_OK) {
-        qDebug() << "LTR_StartSecondMark failed";
+    const INT result = LTR_StartSecondMark(m_hcrate, LTR_MARK_INTERNAL);
+    if (result != LTR_OK) {
+        m_lastResult = make_ltr_result(LtrApiModule::Common, "LTR_StartSecondMark", result);
+        qDebug() << m_lastResult.message;
         return false;
     }
 
+    m_lastResult = make_ltr_success("LTR_StartSecondMark");
     return true;
 }
 
 bool Crate::make_start_mark()
 {
     if (!m_hcrate) {
-        qDebug() << "Crate::make_start_mark: no crate connection";
+        m_lastResult = make_ltr_result(LtrApiModule::Common, "LTR_MakeStartMark", LTR_ERROR_CHANNEL_CLOSED);
+        qDebug() << m_lastResult.message;
         return false;
     }
 
-    if (LTR_MakeStartMark(m_hcrate, LTR_MARK_INTERNAL) != LTR_OK) {
-        qDebug() << "LTR_MakeStartMark failed";
+    const INT result = LTR_MakeStartMark(m_hcrate, LTR_MARK_INTERNAL);
+    if (result != LTR_OK) {
+        m_lastResult = make_ltr_result(LtrApiModule::Common, "LTR_MakeStartMark", result);
+        qDebug() << m_lastResult.message;
         return false;
     }
 
+    m_lastResult = make_ltr_success("LTR_MakeStartMark");
     return true;
 }
 

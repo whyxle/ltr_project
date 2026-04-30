@@ -23,6 +23,7 @@
 #include "ltr114.h"
 #include "ltr212.h"
 #include "ltr_workers.h"
+#include "measurement_writer.h"
 
 #include "crate.h"
 #include <memory>
@@ -58,6 +59,12 @@ class QGroupBox;
 class QDoubleSpinBox;
 class QFile;
 class QTextStream;
+
+enum class PlotXAxisMode
+{
+    Ticks,
+    Seconds
+};
 
 // QT_BEGIN_NAMESPACE
 // class QValueAxis;
@@ -132,14 +139,20 @@ private:
     QComboBox* range212Combo;
     QChartView* chartView114;
     QChartView* chartView212;
+    QChartView* chartViewSync;
     QChart* chart114;
     QChart* chart212;
+    QChart* chartSync;
     QLineSeries* lineSeries114;
     QLineSeries* lineSeries212 = nullptr;
+    QLineSeries* lineSeriesSync114 = nullptr;
+    QLineSeries* lineSeriesSync212 = nullptr;
     QValueAxis* axisX114;
     QValueAxis* axisY114;
     QValueAxis* axisX212;
     QValueAxis* axisY212;
+    QValueAxis* axisXSync;
+    QValueAxis* axisYSync;
 
     QString m_crateSerial;
     int m_ltr114Slot = -1;
@@ -157,18 +170,13 @@ private:
     Ltr212Worker* m_ltr212Worker = nullptr;
 
     bool m_captureRunning = false;
+    bool m_captureRestartRequired = false;
     QVector<QPointF> m_plotPoints;
     QVector<TimedSample> m_allSamples;
     QVector<TimedSample> m_pendingFileSamples114;
     QVector<TimedSample> m_pendingFileSamples212;
-    QFile* m_captureFile = nullptr;
-    QTextStream* m_captureStream = nullptr;
-    QString m_captureFilePath;
-    QFile* m_captureFile212 = nullptr;
-    QTextStream* m_captureStream212 = nullptr;
-    QString m_captureFilePath212;
-    quint64 m_captureSampleIndex114 = 0;
-    quint64 m_captureSampleIndex212 = 0;
+    MeasurementWriter m_captureWriter114;
+    MeasurementWriter m_captureWriter212;
     bool m_simulationMode = false;
     bool m_simulateTwoModules = true;   // false = только LTR114, true = LTR114 + LTR212
     double m_simulatedSampleAccumulator = 0.0;
@@ -179,6 +187,9 @@ private:
     QTimer* m_simulationTimer = nullptr;
 
     QVector<QPointF> m_plotPoints212;
+    QVector<QPointF> m_timePlotPoints114;
+    QVector<QPointF> m_timePlotPoints212;
+    PlotXAxisMode m_plotXAxisMode = PlotXAxisMode::Ticks;
     bool m_autoScaleX = true;
     bool m_autoScaleY = true;
     bool m_showChart114 = true;
@@ -207,18 +218,7 @@ private:
     bool open_ltr212_for_capture();
     void close_ltr212_capture();
 
-    // === НОВЫЕ КОНСТАНТЫ ДЛЯ ГРАФИКА ===
-    const double PLOT_WINDOW_SECONDS = 10.0;     // сколько секунд видно на графике
     const int    MAX_PLOT_POINTS     = 1200;     // максимум точек на одну серию (чтобы не тормозило)
-
-    // Виртуальные тики для графика (независимо от globalTick)
-    quint64 m_virtualTick114 = 0;
-    quint64 m_virtualTick212 = 0;
-
-    // quint64 m_startGlobalTick = 0; // ДЛЯ GLOBALTICK В ГРАФИКЕ (!!!)
-
-    const quint64 PLOT_WINDOW_TICKS = 100; // ОКНО ТИКОВ КОТОРОЕ ПОСТЕПЕННО БУДЕТ СДВИГАТЬСЯ
-
 
     // счётчики для "каждые N семплов"
     quint64 m_plotCounter114 = 0;

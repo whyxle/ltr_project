@@ -5,6 +5,7 @@
 #include <QList>
 #include <QPair>
 #include <memory>
+#include "ltr_result.h"
 #include "LTR/ltrapi.h"
 
 class Module;
@@ -24,6 +25,7 @@ public:
     bool is_open() const { return m_hcrate != nullptr; }
 
     QString serial_number() const { return m_serial_number; }
+    LtrResult last_result() const { return m_lastResult; }
 
     QList<QPair<int, WORD>> get_modules() const;
 
@@ -38,6 +40,7 @@ public:
 private:
     QString m_serial_number;
     TLTR* m_hcrate;   // дескриптор управляющего соединения с крейтом
+    LtrResult m_lastResult;
 };
 
 #endif // CRATE_H
