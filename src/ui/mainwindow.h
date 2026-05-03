@@ -56,6 +56,7 @@ class QCheckBox;
 class QComboBox;
 class QGroupBox;
 class QDockWidget;
+class QToolBar;
 class QDoubleSpinBox;
 class QFile;
 class QTextStream;
@@ -103,7 +104,8 @@ private:
     void update_ltr212_channel_limit();
     void set_capture_controls_enabled(bool enabled);
     QDockWidget* create_settings_dock(const QString& title, QWidget* content, const QString& objectName);
-    void show_settings_dock(QDockWidget* dock);
+    QDockWidget* create_modules_dock(QWidget* content);
+    void show_dock(QDockWidget* dock, bool floating);
 
     const int CONNECTION_TIMEOUT_MS = 10000;
 
@@ -114,6 +116,9 @@ private:
     std::unique_ptr<LTR212> m_ltr212;
 
     QListWidget* modulesList;
+    QToolBar* mainToolBar;
+    QDockWidget* modulesDock;
+    QPushButton* modulesDockButton;
     QTextEdit* infoText;
     QPushButton* startButton;
     QPushButton* stopButton;

@@ -14,6 +14,7 @@
 #include <QGroupBox>
 #include <QDockWidget>
 #include <QScrollArea>
+#include <QToolBar>
 #include <QFormLayout>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -63,6 +64,11 @@ QString MainWindow::module_name(WORD mid)
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
+    , modulesList(nullptr)
+    , mainToolBar(nullptr)
+    , modulesDock(nullptr)
+    , modulesDockButton(nullptr)
+    , infoText(nullptr)
     , startButton(nullptr)
     , stopButton(nullptr)
     , sampleRateSpin(nullptr)
@@ -178,13 +184,27 @@ QDockWidget* MainWindow::create_settings_dock(const QString& title, QWidget* con
     return dock;
 }
 
-void MainWindow::show_settings_dock(QDockWidget* dock)
+QDockWidget* MainWindow::create_modules_dock(QWidget* content)
+{
+    QDockWidget* dock = new QDockWidget("LTR слоты", this);
+    dock->setObjectName("modulesDock");
+    dock->setAllowedAreas(Qt::AllDockWidgetAreas);
+    dock->setFeatures(QDockWidget::DockWidgetClosable
+                      | QDockWidget::DockWidgetMovable
+                      | QDockWidget::DockWidgetFloatable);
+    dock->setMinimumWidth(300);
+    dock->setWidget(content);
+    addDockWidget(Qt::LeftDockWidgetArea, dock);
+    return dock;
+}
+
+void MainWindow::show_dock(QDockWidget* dock, bool floating)
 {
     if (!dock)
         return;
 
     dock->show();
-    dock->setFloating(true);
+    dock->setFloating(floating);
     dock->raise();
     dock->activateWindow();
 }
@@ -197,19 +217,20 @@ void MainWindow::init_ui_replace()
                    | QMainWindow::AllowNestedDocks
                    | QMainWindow::AllowTabbedDocks);
 
-    QHBoxLayout* main_lay = new QHBoxLayout;
-    central->setLayout(main_lay);
+    QVBoxLayout* mainLay = new QVBoxLayout;
+    mainLay->setContentsMargins(0, 0, 0, 0);
+    central->setLayout(mainLay);
 
     modulesList = new QListWidget(this);
     modulesList->setMinimumWidth(320);
     modulesList->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     modulesList->setSelectionMode(QAbstractItemView::NoSelection);
     modulesList->setFocusPolicy(Qt::NoFocus);
+    modulesDock = create_modules_dock(modulesList);
 
     QWidget* rightPanel = new QWidget(this);
     QVBoxLayout* rightLay = new QVBoxLayout(rightPanel);
 
-    QHBoxLayout* controlLay = new QHBoxLayout;
     sampleRateSpin = new QSpinBox(this);
     sampleRateSpin->setRange(1, 4000);
     sampleRateSpin->setValue(100);
@@ -227,9 +248,6 @@ void MainWindow::init_ui_replace()
     stopButton = new QPushButton("Остановить", this);
     stopButton->setEnabled(false);
 
-    controlLay->addWidget(startButton);
-    controlLay->addWidget(stopButton);
-
     saveToFileCheck = new QCheckBox("Сохранять файл", this);
     saveToFileCheck->setChecked(true);
 
@@ -242,17 +260,23 @@ void MainWindow::init_ui_replace()
     ltr114SettingsButton = new QPushButton("LTR114", this);
     simulationSettingsButton = new QPushButton("Симуляция", this);
     ltr212SettingsButton = new QPushButton("LTR212", this);
+    modulesDockButton = new QPushButton("Слоты", this);
 
-    rightLay->addLayout(controlLay);
-
-    QHBoxLayout* settingsButtonsLay = new QHBoxLayout;
-    settingsButtonsLay->addWidget(commonSettingsButton);
-    settingsButtonsLay->addWidget(ltr114SettingsButton);
-    settingsButtonsLay->addWidget(ltr212SettingsButton);
-    settingsButtonsLay->addWidget(simulationSettingsButton);
-    settingsButtonsLay->addStretch(1);
-    settingsButtonsLay->addWidget(plotSettingsButton);
-    rightLay->addLayout(settingsButtonsLay);
+    mainToolBar = addToolBar("Управление");
+    mainToolBar->setObjectName("mainToolBar");
+    mainToolBar->setAllowedAreas(Qt::TopToolBarArea);
+    mainToolBar->setMovable(false);
+    mainToolBar->setFloatable(false);
+    mainToolBar->addWidget(startButton);
+    mainToolBar->addWidget(stopButton);
+    mainToolBar->addSeparator();
+    mainToolBar->addWidget(modulesDockButton);
+    mainToolBar->addWidget(commonSettingsButton);
+    mainToolBar->addWidget(ltr114SettingsButton);
+    mainToolBar->addWidget(ltr212SettingsButton);
+    mainToolBar->addWidget(simulationSettingsButton);
+    mainToolBar->addSeparator();
+    mainToolBar->addWidget(plotSettingsButton);
 
     commonSettingsGroup = new QGroupBox("Общие параметры", this);
     QFormLayout* commonLay = new QFormLayout(commonSettingsGroup);
@@ -358,8 +382,7 @@ void MainWindow::init_ui_replace()
 
     rightLay->addWidget(infoText, 1);
 
-    main_lay->addWidget(modulesList, 0);
-    main_lay->addWidget(rightPanel, 1);
+    mainLay->addWidget(rightPanel, 1);
 
     connect(startButton, &QPushButton::clicked, this, &MainWindow::on_start_capture_clicked);
     connect(stopButton, &QPushButton::clicked, this, &MainWindow::on_stop_capture_clicked);
@@ -367,18 +390,26 @@ void MainWindow::init_ui_replace()
         update_axis_unit_labels();
     });
     connect(plotSettingsButton, &QPushButton::clicked, this, &MainWindow::show_plot_settings_dialog);
-    connect(commonSettingsButton, &QPushButton::clicked, this, [this]() {
-        show_settings_dock(commonSettingsDock);
-    });
-    connect(ltr114SettingsButton, &QPushButton::clicked, this, [this]() {
-        show_settings_dock(ltr114SettingsDock);
-    });
-    connect(ltr212SettingsButton, &QPushButton::clicked, this, [this]() {
-        show_settings_dock(ltr212SettingsDock);
-    });
-    connect(simulationSettingsButton, &QPushButton::clicked, this, [this]() {
-        show_settings_dock(simulationSettingsDock);
-    });
+    auto bindDockButton = [this](QPushButton* button, QDockWidget* dock, bool floating) {
+        if (!button || !dock)
+            return;
+
+        button->setCheckable(true);
+        button->setChecked(!dock->isHidden());
+        connect(button, &QPushButton::clicked, this, [this, dock, floating](bool checked) {
+            if (checked) {
+                show_dock(dock, floating);
+            } else {
+                dock->hide();
+            }
+        });
+        connect(dock, &QDockWidget::visibilityChanged, button, &QPushButton::setChecked);
+    };
+    bindDockButton(modulesDockButton, modulesDock, false);
+    bindDockButton(commonSettingsButton, commonSettingsDock, true);
+    bindDockButton(ltr114SettingsButton, ltr114SettingsDock, true);
+    bindDockButton(ltr212SettingsButton, ltr212SettingsDock, true);
+    bindDockButton(simulationSettingsButton, simulationSettingsDock, true);
     connect(acqMode212Combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
         update_ltr212_channel_limit();
     });
