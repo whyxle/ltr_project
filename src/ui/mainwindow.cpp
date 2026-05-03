@@ -12,6 +12,8 @@
 #include <QSpinBox>
 #include <QComboBox>
 #include <QGroupBox>
+#include <QDockWidget>
+#include <QScrollArea>
 #include <QFormLayout>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -69,6 +71,14 @@ MainWindow::MainWindow(QWidget *parent)
     , saveToFileCheck(nullptr)
     , unitCombo(nullptr)
     , plotSettingsButton(nullptr)
+    , commonSettingsButton(nullptr)
+    , ltr114SettingsButton(nullptr)
+    , simulationSettingsButton(nullptr)
+    , ltr212SettingsButton(nullptr)
+    , commonSettingsDock(nullptr)
+    , ltr114SettingsDock(nullptr)
+    , simulationSettingsDock(nullptr)
+    , ltr212SettingsDock(nullptr)
     , commonSettingsGroup(nullptr)
     , ltr114SettingsGroup(nullptr)
     , range114Combo(nullptr)
@@ -146,10 +156,46 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
+QDockWidget* MainWindow::create_settings_dock(const QString& title, QWidget* content, const QString& objectName)
+{
+    QDockWidget* dock = new QDockWidget(title, this);
+    dock->setObjectName(objectName);
+    dock->setAllowedAreas(Qt::AllDockWidgetAreas);
+    dock->setFeatures(QDockWidget::DockWidgetClosable
+                      | QDockWidget::DockWidgetMovable
+                      | QDockWidget::DockWidgetFloatable);
+    dock->setMinimumWidth(320);
+
+    QScrollArea* scroll = new QScrollArea(dock);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    content->setParent(scroll);
+    scroll->setWidget(content);
+
+    dock->setWidget(scroll);
+    addDockWidget(Qt::RightDockWidgetArea, dock);
+    dock->hide();
+    return dock;
+}
+
+void MainWindow::show_settings_dock(QDockWidget* dock)
+{
+    if (!dock)
+        return;
+
+    dock->show();
+    dock->setFloating(true);
+    dock->raise();
+    dock->activateWindow();
+}
+
 void MainWindow::init_ui_replace()
 {
     QWidget* central = ui->centralwidget ? ui->centralwidget : new QWidget(this);
     setCentralWidget(central);
+    setDockOptions(QMainWindow::AnimatedDocks
+                   | QMainWindow::AllowNestedDocks
+                   | QMainWindow::AllowTabbedDocks);
 
     QHBoxLayout* main_lay = new QHBoxLayout;
     central->setLayout(main_lay);
@@ -192,10 +238,21 @@ void MainWindow::init_ui_replace()
     unitCombo->addItem("V", "V");
 
     plotSettingsButton = new QPushButton("Настройки графиков", this);
-    controlLay->addStretch(1);
-    controlLay->addWidget(plotSettingsButton);
+    commonSettingsButton = new QPushButton("Общие", this);
+    ltr114SettingsButton = new QPushButton("LTR114", this);
+    simulationSettingsButton = new QPushButton("Симуляция", this);
+    ltr212SettingsButton = new QPushButton("LTR212", this);
 
     rightLay->addLayout(controlLay);
+
+    QHBoxLayout* settingsButtonsLay = new QHBoxLayout;
+    settingsButtonsLay->addWidget(commonSettingsButton);
+    settingsButtonsLay->addWidget(ltr114SettingsButton);
+    settingsButtonsLay->addWidget(ltr212SettingsButton);
+    settingsButtonsLay->addWidget(simulationSettingsButton);
+    settingsButtonsLay->addStretch(1);
+    settingsButtonsLay->addWidget(plotSettingsButton);
+    rightLay->addLayout(settingsButtonsLay);
 
     commonSettingsGroup = new QGroupBox("Общие параметры", this);
     QFormLayout* commonLay = new QFormLayout(commonSettingsGroup);
@@ -203,7 +260,7 @@ void MainWindow::init_ui_replace()
     commonLay->addRow("Размер блока:", chunkSizeSpin);
     commonLay->addRow("Сохранение:", saveToFileCheck);
     commonLay->addRow("Единицы:", unitCombo);
-    rightLay->addWidget(commonSettingsGroup);
+    commonSettingsDock = create_settings_dock("Общие параметры", commonSettingsGroup, "commonSettingsDock");
 
     ltr114SettingsGroup = new QGroupBox("Настройки LTR114", this);
     QFormLayout* ltr114Lay = new QFormLayout(ltr114SettingsGroup);
@@ -232,7 +289,7 @@ void MainWindow::init_ui_replace()
     ltr114Lay->addRow("Диапазон:", range114Combo);
     ltr114Lay->addRow("SyncMode:", syncMode114Combo);
     ltr114Lay->addRow("Interval:", interval114Spin);
-    rightLay->addWidget(ltr114SettingsGroup);
+    ltr114SettingsDock = create_settings_dock("Настройки LTR114", ltr114SettingsGroup, "ltr114SettingsDock");
 
     simulationSettingsGroup = new QGroupBox("Режим симуляции", this);
     QFormLayout* simulationLay = new QFormLayout(simulationSettingsGroup);
@@ -241,8 +298,7 @@ void MainWindow::init_ui_replace()
     simulationRateSpin->setValue(sampleRateSpin->value());
     simulationRateSpin->setSuffix(" Гц");
     simulationLay->addRow("Частота симуляции:", simulationRateSpin);
-    simulationSettingsGroup->setVisible(false);
-    rightLay->addWidget(simulationSettingsGroup);
+    simulationSettingsDock = create_settings_dock("Режим симуляции", simulationSettingsGroup, "simulationSettingsDock");
 
     ltr212SettingsGroup = new QGroupBox("Настройки LTR212", this);
     QFormLayout* ltr212Lay = new QFormLayout(ltr212SettingsGroup);
@@ -290,7 +346,7 @@ void MainWindow::init_ui_replace()
     ltr212Lay->addRow("AC/DC:", acMode212Combo);
     ltr212Lay->addRow("Каналов:", channelCount212Spin);
     ltr212Lay->addRow("Диапазон:", range212Combo);
-    rightLay->addWidget(ltr212SettingsGroup);
+    ltr212SettingsDock = create_settings_dock("Настройки LTR212", ltr212SettingsGroup, "ltr212SettingsDock");
 
     infoText = new QTextEdit(this);
     infoText->setReadOnly(true);
@@ -311,6 +367,18 @@ void MainWindow::init_ui_replace()
         update_axis_unit_labels();
     });
     connect(plotSettingsButton, &QPushButton::clicked, this, &MainWindow::show_plot_settings_dialog);
+    connect(commonSettingsButton, &QPushButton::clicked, this, [this]() {
+        show_settings_dock(commonSettingsDock);
+    });
+    connect(ltr114SettingsButton, &QPushButton::clicked, this, [this]() {
+        show_settings_dock(ltr114SettingsDock);
+    });
+    connect(ltr212SettingsButton, &QPushButton::clicked, this, [this]() {
+        show_settings_dock(ltr212SettingsDock);
+    });
+    connect(simulationSettingsButton, &QPushButton::clicked, this, [this]() {
+        show_settings_dock(simulationSettingsDock);
+    });
     connect(acqMode212Combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
         update_ltr212_channel_limit();
     });
@@ -904,8 +972,13 @@ void MainWindow::show_plot_settings_dialog()
 void MainWindow::update_ltr212_controls_state()
 {
     const bool workerRunning = m_ltr212Thread && m_ltr212Thread->isRunning();
+    const bool available = m_ltr212Slot >= 0;
     if (ltr212SettingsGroup)
-        ltr212SettingsGroup->setEnabled(!m_captureRunning && !workerRunning && m_ltr212Slot >= 0);
+        ltr212SettingsGroup->setEnabled(!m_captureRunning && !workerRunning && available);
+    if (ltr212SettingsButton)
+        ltr212SettingsButton->setEnabled(available);
+    if (!available && ltr212SettingsDock)
+        ltr212SettingsDock->hide();
 }
 
 void MainWindow::update_ltr114_controls_state()
@@ -914,11 +987,15 @@ void MainWindow::update_ltr114_controls_state()
         return;
 
     const bool workerRunning = m_ltr114Thread && m_ltr114Thread->isRunning();
+    const bool available = !m_simulationMode && m_ltr114Slot >= 0;
     ltr114SettingsGroup->setVisible(true);
-    ltr114SettingsGroup->setEnabled(!m_simulationMode
+    ltr114SettingsGroup->setEnabled(available
                                     && !m_captureRunning
-                                    && !workerRunning
-                                    && m_ltr114Slot >= 0);
+                                    && !workerRunning);
+    if (ltr114SettingsButton)
+        ltr114SettingsButton->setEnabled(available);
+    if (!available && ltr114SettingsDock)
+        ltr114SettingsDock->hide();
 }
 
 void MainWindow::update_simulation_controls_state()
@@ -928,8 +1005,12 @@ void MainWindow::update_simulation_controls_state()
 
     const bool workerRunning = (m_ltr114Thread && m_ltr114Thread->isRunning())
                                || (m_ltr212Thread && m_ltr212Thread->isRunning());
-    simulationSettingsGroup->setVisible(m_simulationMode);
+    simulationSettingsGroup->setVisible(true);
     simulationSettingsGroup->setEnabled(!m_captureRunning && !workerRunning && m_simulationMode);
+    if (simulationSettingsButton)
+        simulationSettingsButton->setEnabled(m_simulationMode);
+    if (!m_simulationMode && simulationSettingsDock)
+        simulationSettingsDock->hide();
 }
 
 void MainWindow::update_ltr212_channel_limit()

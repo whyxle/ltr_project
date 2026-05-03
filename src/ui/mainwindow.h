@@ -55,6 +55,7 @@ class QSpinBox;
 class QCheckBox;
 class QComboBox;
 class QGroupBox;
+class QDockWidget;
 class QDoubleSpinBox;
 class QFile;
 class QTextStream;
@@ -101,6 +102,8 @@ private:
     void update_simulation_controls_state();
     void update_ltr212_channel_limit();
     void set_capture_controls_enabled(bool enabled);
+    QDockWidget* create_settings_dock(const QString& title, QWidget* content, const QString& objectName);
+    void show_settings_dock(QDockWidget* dock);
 
     const int CONNECTION_TIMEOUT_MS = 10000;
 
@@ -120,6 +123,14 @@ private:
     QCheckBox* saveToFileCheck;
     QComboBox* unitCombo;
     QPushButton* plotSettingsButton;
+    QPushButton* commonSettingsButton;
+    QPushButton* ltr114SettingsButton;
+    QPushButton* simulationSettingsButton;
+    QPushButton* ltr212SettingsButton;
+    QDockWidget* commonSettingsDock;
+    QDockWidget* ltr114SettingsDock;
+    QDockWidget* simulationSettingsDock;
+    QDockWidget* ltr212SettingsDock;
     QGroupBox* commonSettingsGroup;
     QGroupBox* ltr114SettingsGroup;
     QComboBox* range114Combo;
