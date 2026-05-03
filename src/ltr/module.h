@@ -18,4 +18,4 @@ public:
     virtual QVector<DWORD> receive_data(DWORD timeout, int* errorCode = nullptr) = 0;
 };
 
-#endif // MODULE_H
+#endif

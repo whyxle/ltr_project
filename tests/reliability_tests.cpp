@@ -27,7 +27,7 @@ QStringList readLines(const QString& path)
     return lines;
 }
 
-} // namespace
+}
 
 class ReliabilityTests : public QObject
 {

@@ -82,4 +82,4 @@ private:
 };
 
 
-#endif // LTR_WORKERS_H
+#endif

@@ -65,12 +65,12 @@ enum class PlotXAxisMode
     Seconds
 };
 
-// QT_BEGIN_NAMESPACE
-// class QValueAxis;
-// class QLineSeries;
-// class QChart;
-// class QChartView;
-// QT_END_NAMESPACE
+
+
+
+
+
+
 
 class MainWindow : public QMainWindow
 {
@@ -105,10 +105,10 @@ private:
     const int CONNECTION_TIMEOUT_MS = 10000;
 
     Ui::MainWindow *ui;
-    std::unique_ptr<Crate> m_crate;        // управление крейтом
-    std::unique_ptr<LTR11> m_ltr11;        // управление модулем LTR11
-    std::unique_ptr<LTR114> m_ltr114;      // управление модулем LTR114
-    std::unique_ptr<LTR212> m_ltr212;      // управление модулем LTR212
+    std::unique_ptr<Crate> m_crate;
+    std::unique_ptr<LTR11> m_ltr11;
+    std::unique_ptr<LTR114> m_ltr114;
+    std::unique_ptr<LTR212> m_ltr212;
 
     QListWidget* modulesList;
     QTextEdit* infoText;
@@ -160,7 +160,7 @@ private:
     bool m_usingLtr212 = false;
     bool m_usingLtr114 = false;
 
-    // Общая синхронизация по tmark между worker-потоками.
+
     SyncState m_syncState;
 
     QThread* m_ltr114Thread = nullptr;
@@ -177,7 +177,7 @@ private:
     MeasurementWriter m_captureWriter114;
     MeasurementWriter m_captureWriter212;
     bool m_simulationMode = false;
-    bool m_simulateTwoModules = true;   // false = только LTR114, true = LTR114 + LTR212
+    bool m_simulateTwoModules = true;
     double m_simulatedSampleAccumulator = 0.0;
     double m_simulatedSampleAccumulator212 = 0.0;
     int m_simulatedSampleRate = 2000;
@@ -217,9 +217,9 @@ private:
     bool open_ltr212_for_capture();
     void close_ltr212_capture();
 
-    const int    MAX_PLOT_POINTS     = 1200;     // максимум точек на одну серию (чтобы не тормозило)
+    const int    MAX_PLOT_POINTS     = 1200;
 
-    // счётчики для "каждые N семплов"
+
     quint64 m_plotCounter114 = 0;
     quint64 m_plotCounter212 = 0;
 
@@ -228,4 +228,4 @@ private slots:
     void on_stop_capture_clicked();
 };
 
-#endif // MAINWINDOW_H
+#endif

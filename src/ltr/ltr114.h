@@ -24,7 +24,7 @@ public:
     void set_sync_mode(DWORD sync_mode);
     void set_interval(DWORD interval);
 
-    // === НОВОЕ: приём с синхрометками ===
+
     QPair<QVector<DWORD>, QVector<DWORD>> receive_data_with_marks(
         DWORD timeout, int* error_code = nullptr);
 
@@ -41,4 +41,4 @@ private:
     int m_slot;
 };
 
-#endif // LTR114_H
+#endif

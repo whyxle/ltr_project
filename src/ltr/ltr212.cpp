@@ -16,7 +16,7 @@ LTR212::~LTR212()
 
 bool LTR212::open(const QString& crate_sn, int slot)
 {
-    return open(crate_sn, slot, "ltr212.bio");   // вызов полной версии
+    return open(crate_sn, slot, "ltr212.bio");
 }
 
 bool LTR212::open(const QString& crate_sn, int slot, const QString& bios)
@@ -106,7 +106,7 @@ QVector<DWORD> LTR212::receive_data(DWORD timeout, int* error_code)
         return data;
     }
 
-    // Для LTR212 размер буфера можно позже сделать настраиваемым
+
     INT requested_size = 4096;
     data.resize(requested_size);
 
@@ -156,7 +156,7 @@ void LTR212::set_ac_mode(INT ac)
 void LTR212::set_logical_channels(int count, const INT* channel_table)
 {
     if (count < 0) count = 0;
-    if (count > 8) count = 8; // максимум 8 для LTR212
+    if (count > 8) count = 8;
 
     m_handle.LChQnt = count;
     for (int i = 0; i < count; ++i)
@@ -178,7 +178,7 @@ QVector<double> LTR212::process_data(const QVector<DWORD>& src, bool to_volts, i
         return {};
     }
 
-    // Резервируем место (по описанию из мануала размер примерно делится пополам)
+
     QVector<double> dest(src.size() / 2 + 64);
     DWORD proc_size = static_cast<DWORD>(src.size());
 
@@ -240,5 +240,5 @@ bool LTR212::get_config()
         return false;
     }
     m_lastResult = make_ltr_success("LTR212_GetConfig");
-    return true;   // get_config нет для ltr212
+    return true;
 }

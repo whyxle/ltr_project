@@ -13,7 +13,7 @@ constexpr DWORD kRecvTimeoutMs = 50;
 constexpr int kModule114 = kSyncModule114;
 constexpr int kModule212 = kSyncModule212;
 
-} // namespace
+}
 
 Ltr114Worker::Ltr114Worker(LTR114* module, SyncState* syncState, QObject* parent)
     : QObject(parent)

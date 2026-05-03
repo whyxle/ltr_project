@@ -25,4 +25,4 @@ QString ltr_error_text(LtrApiModule module, INT code);
 LtrResult make_ltr_result(LtrApiModule module, const QString& operation, INT code, bool ok = false);
 LtrResult make_ltr_success(const QString& operation = QString());
 
-#endif // LTR_RESULT_H
+#endif

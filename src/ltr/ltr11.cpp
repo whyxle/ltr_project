@@ -1,5 +1,5 @@
 #include "ltr11.h"
-#include "LTR/ltrapi.h"   // для LTR_Recv
+#include "LTR/ltrapi.h"
 #include <QDebug>
 #include <cstring>
 
@@ -66,7 +66,7 @@ bool LTR11::apply_config()
         m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR11_SetADC", LTR_ERROR_CHANNEL_CLOSED);
         return false;
     }
-    // Здесь можно применить различные настройки, но для простоты используем LTR11_SetADC
+
     int rc = LTR11_SetADC(&m_handle);
     if (rc != LTR_OK) {
         m_lastResult = make_ltr_result(LtrApiModule::Ltr11, "LTR11_SetADC", rc);

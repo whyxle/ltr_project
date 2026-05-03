@@ -11,9 +11,9 @@ public:
     LTR212();
     ~LTR212() override;
 
-    // === ИСПРАВЛЕНО: две перегрузки open ===
-    bool open(const QString& crate_sn, int slot) override;                    // для базового класса
-    bool open(const QString& crate_sn, int slot, const QString& bios);        // с bios (по умолчанию)
+
+    bool open(const QString& crate_sn, int slot) override;
+    bool open(const QString& crate_sn, int slot, const QString& bios);
 
     void close() override;
     bool apply_config() override;
@@ -23,7 +23,7 @@ public:
     bool get_config() override;
     QVector<double> process_data(const QVector<DWORD>& raw_data, bool to_volts = true, int* error_code = nullptr);
 
-    // === СЕТТЕРЫ — теперь полностью совпадают с .cpp ===
+
     void set_acq_mode(INT mode);
     void set_use_clb(INT use);
     void set_use_fabric_clb(INT use);
@@ -48,4 +48,4 @@ private:
     int m_slot;
 };
 
-#endif // LTR212_H
+#endif

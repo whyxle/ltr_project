@@ -19,7 +19,7 @@ SyncModuleState& moduleState(SyncState& state, int moduleId)
     return moduleId == kSyncModule212 ? state.ltr212 : state.ltr114;
 }
 
-} // namespace
+}
 
 quint32 extractStartMark(DWORD tmarkWord)
 {

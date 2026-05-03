@@ -108,4 +108,4 @@ void addAcceptedValues(SyncState* syncState, int moduleId, qsizetype count);
 quint64 syncTimeBase(SyncState* syncState);
 QString syncModuleName(int moduleId);
 
-#endif // SYNC_TIMELINE_H
+#endif

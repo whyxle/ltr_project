@@ -29,4 +29,4 @@ private:
     quint64 m_sampleIndex = 0;
 };
 
-#endif // MEASUREMENT_WRITER_H
+#endif

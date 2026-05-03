@@ -24,7 +24,7 @@ public:
     void set_ADC_rate(BYTE prescaler, BYTE divider);
     void set_logical_channels(int count, const BYTE* channelTable);
 
-    // геттеры для получения информации о модуле
+
     QString module_name() const { return QString::fromLatin1(m_handle.ModuleInfo.Name); }
     QString module_serial() const { return QString::fromLatin1(m_handle.ModuleInfo.Serial); }
     int firmware_version() const { return m_handle.ModuleInfo.Ver; }
@@ -41,4 +41,4 @@ private:
     int m_slot;
 };
 
-#endif // LTR11_H
+#endif

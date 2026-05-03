@@ -18,7 +18,7 @@ public:
     explicit Crate(const QString& serial_number);
     ~Crate();
 
-    // запрет копирования
+
     Crate(const Crate&) = delete;
     Crate& operator=(const Crate&) = delete;
 
@@ -39,8 +39,8 @@ public:
 
 private:
     QString m_serial_number;
-    TLTR* m_hcrate;   // дескриптор управляющего соединения с крейтом
+    TLTR* m_hcrate;
     LtrResult m_lastResult;
 };
 
-#endif // CRATE_H
+#endif

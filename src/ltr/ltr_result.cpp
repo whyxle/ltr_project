@@ -13,7 +13,7 @@ QString errorStringFromPtr(LPCSTR text)
     return QString::fromLocal8Bit(text).trimmed();
 }
 
-} // namespace
+}
 
 QString ltr_error_text(LtrApiModule module, INT code)
 {

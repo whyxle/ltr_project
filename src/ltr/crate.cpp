@@ -84,7 +84,7 @@ WORD Crate::get_slot_count() const
                               &stat, sizeof(stat)) == LTR_OK) {
         return stat.modules_cnt;
     }
-    return 0; // ошибка
+    return 0;
 }
 
 QList<QPair<int, WORD>> Crate::get_modules() const
@@ -96,7 +96,7 @@ QList<QPair<int, WORD>> Crate::get_modules() const
     if (LTR_GetCrateModules(m_hcrate, mid) == 0) {
         for (int slot = 0; slot < LTR_MODULES_PER_CRATE_MAX; ++slot) {
             if (mid[slot] != LTR_MID_EMPTY) {
-                modules.append(qMakePair(slot + 1, mid[slot])); // слоты в LTR нумеруются с 1
+                modules.append(qMakePair(slot + 1, mid[slot]));
             }
         }
     }
@@ -104,11 +104,11 @@ QList<QPair<int, WORD>> Crate::get_modules() const
 }
 
 
-// создаем объект модуля на основе его идентификатора
+
 std::unique_ptr<Module> Crate::create_module(int slot) const
 {
-    // if (!m_hcrate || slot < 1 || slot > LTR_MODULES_PER_CRATE_MAX)
-    //     return nullptr;
+
+
 
     WORD mid[LTR_MODULES_PER_CRATE_MAX] = {};
     if (LTR_GetCrateModules(m_hcrate, mid) != 0)
@@ -118,7 +118,7 @@ std::unique_ptr<Module> Crate::create_module(int slot) const
     if (moduleId == LTR_MID_EMPTY || moduleId == LTR_MID_IDENTIFYING || moduleId == LTR_MID_INVALID)
         return nullptr;
 
-    //  потом расширить для других типов модулей
+
     if (moduleId == LTR_MID_LTR11) {
         auto module = std::make_unique<LTR11>();
         if (module->open(m_serial_number, slot))
@@ -130,7 +130,7 @@ std::unique_ptr<Module> Crate::create_module(int slot) const
         if (module->open(m_serial_number, slot))
             return module;
     }
-    // нужны классы для других модулей
+
 
     return nullptr;
 }
@@ -178,7 +178,7 @@ void Crate::stop_sync_marks()
 {
     if (m_hcrate) {
         LTR_StopSecondMark(m_hcrate);
-        // Опционально выключаем START (не обязательно)
+
         LTR_MakeStartMark(m_hcrate, LTR_MARK_OFF);
     }
 }

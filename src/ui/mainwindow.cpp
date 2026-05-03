@@ -38,7 +38,7 @@ QString MainWindow::module_name(WORD mid)
     {
     case LTR_MID_EMPTY: return "EMPTY";
     case LTR_MID_IDENTIFYING: return "IDENTIFYING";
-    // case LTR_MID_INVALID: return "INVALID";
+
     case LTR_MID_LTR01: return "LTR01";
     case LTR_MID_LTR11: return "LTR11";
     case LTR_MID_LTR22: return "LTR22";
@@ -523,7 +523,7 @@ bool MainWindow::open_ltr114_for_capture()
                                                    interval114Spin ? interval114Spin->value() : 0,
                                                    65535));
 
-    // указываем номер канала, режим и диапазон измерений
+
     lch_tbl[0] = LTR114_CreateLChannel(LTR114_MEASMODE_U, physicalChannel, rangeCode);
 
     const int requestedSampleRate = sampleRateSpin->value();
@@ -531,7 +531,7 @@ bool MainWindow::open_ltr114_for_capture()
                                     qRound(8000.0 / qMax(1, requestedSampleRate)),
                                     LTR114_FREQ_DIVIDER_MAX);
     const DWORD divider = static_cast<DWORD>(dividerValue);
-    // был тип string
+
 
     m_ltr114->set_freq_divider(divider);
     m_ltr114->set_logical_channels(1, lch_tbl);
@@ -596,7 +596,7 @@ bool MainWindow::open_ltr212_for_capture()
 
     m_ltr212 = std::make_unique<LTR212>();
 
-    if (!m_ltr212->open(m_crateSerial, m_ltr212Slot, "ltr212.bio")) {  // ← используй полную версию open
+    if (!m_ltr212->open(m_crateSerial, m_ltr212Slot, "ltr212.bio")) {
         appendInfo(m_ltr212->last_result().message, true);
         m_ltr212.reset();
         return false;
@@ -614,41 +614,41 @@ bool MainWindow::open_ltr212_for_capture()
                                 channelCount212Spin ? channelCount212Spin->value() : 1,
                                 maxChannels);
 
-    // ПРАВИЛЬНАЯ КОНФИГУРАЦИЯ
-    m_ltr212->set_size();                    // вызывается в open(), но на всякий случай (!!!!!)
+
+    m_ltr212->set_size();
     m_ltr212->set_acq_mode(acqMode);
     m_ltr212->set_use_clb(useClb);
     m_ltr212->set_use_fabric_clb(useFabricClb);
     m_ltr212->set_ref_voltage(refVoltage);
     m_ltr212->set_ac_mode(acMode);
 
-    // === ЛОГИЧЕСКИЕ КАНАЛЫ — САМЫЙ ВАЖНЫЙ МОМЕНТ ===
+
     INT ch_table[8] = {};
 
-    //  физический канал 1, диапазон ±80 мВ
+
     for (int i = 0; i < ch_count; ++i) {
         ch_table[i] = LTR212_CreateLChannel(i + 1, rangeCode);
     }
 
-    // Если нужно несколько каналов
-    // ch_table[1] = LTR212_CreateLChannel(2, LTR212_SCALE_B_40);
-    // ch_table[2] = LTR212_CreateLChannel(3, LTR212_SCALE_B_20); и т.д.
+
+
+
 
     m_ltr212->set_logical_channels(ch_count, ch_table);
 
-    // Применяем настройки
-    if (!m_ltr212->apply_config()) {   // внутри: LTR212_SetADC()
+
+    if (!m_ltr212->apply_config()) {
         appendInfo(m_ltr212->last_result().message, true);
         m_ltr212.reset();
         return false;
     }
 
-    // Автокалибровка LTR212 отключена: на реальном модуле она падала внутри DLL.
-    // BYTE channelMask[LTR212_LCH_CNT_MAX] = {};
-    // for (int i = 0; i < ch_count; ++i)
-    //     channelMask[i] = 1;
-    // const INT calibrResult = LTR212_Calibrate(
-    //     m_ltr212->handle(), channelMask, LTR212_CALIBR_MODE_INT_FULL, 1);
+
+
+
+
+
+
 
     appendInfo(QString("LTR212 сконфигурирован: %1 канал(ов), AcqMode=%2, REF=%3")
                    .arg(ch_count)
@@ -676,7 +676,7 @@ void MainWindow::run_ltr212_module(const QString& crate_sn, int ltr212_slot)
 {
     m_crateSerial = crate_sn;
     m_ltr212Slot = ltr212_slot;
-    // m_crateSerial уже установлен LTR114 или можно установить отдельно
+
     appendInfo(QString("LTR212 найден в слоте %1. Готов к работе.").arg(ltr212_slot));
     update_ltr212_controls_state();
     update_plot_visibility();
@@ -1389,7 +1389,7 @@ void MainWindow::process_voltage_samples(const QVector<TimedSample>& voltageSamp
         }
     }
 
-    // Ограничение количества точек (чтобы не перегружать QtCharts)
+
     if (modulePlotPoints.size() > MAX_PLOT_POINTS) {
         modulePlotPoints.remove(0, modulePlotPoints.size() - MAX_PLOT_POINTS);
     }
@@ -1397,7 +1397,7 @@ void MainWindow::process_voltage_samples(const QVector<TimedSample>& voltageSamp
         moduleTimePlotPoints.remove(0, moduleTimePlotPoints.size() - MAX_PLOT_POINTS);
     }
 
-    // Запись в файл (оставляем как было)
+
     if (saveToFileCheck->isChecked() && !modulePendingFileSamples.isEmpty()) {
         int rateHz = m_simulationMode && simulationRateSpin
                          ? simulationRateSpin->value()
@@ -1439,10 +1439,10 @@ QVector<TimedSample> MainWindow::generate_simulated_samples(int moduleId)
 
     samples.reserve(samplesToGenerate);
 
-    const quint64 ticksPerSample = 1000000ULL / static_cast<quint64>(sampleRate); // микросекунды на семпл
+    const quint64 ticksPerSample = 1000000ULL / static_cast<quint64>(sampleRate);
     const double dt = 1.0 / sampleRate;
 
-    // твои параметры сигнала (оставь как было)
+
     const double freq1 = (moduleId == 1) ? qMin(7.0, sampleRate / 17.0) : qMin(5.0, sampleRate / 20.0);
     const double freq2 = (moduleId == 1) ? qMin(11.0, sampleRate / 10.0) : qMin(13.0, sampleRate / 12.0);
     const double amp1 = (moduleId == 1) ? 0.00095 : 0.0012;
@@ -1465,7 +1465,7 @@ QVector<TimedSample> MainWindow::generate_simulated_samples(int moduleId)
         s.value          = signal;
 
         samples.append(s);
-        ++signalTick;                     // ← важно!
+        ++signalTick;
     }
 
     return samples;
@@ -1509,7 +1509,7 @@ void MainWindow::init_ltr()
     m_crate = std::make_unique<Crate>(crate_sn);
     if (!m_crate->is_open()) {
         appendInfo(m_crate->last_result().message, true);
-        // m_crate.reset();
+
         startButton->setEnabled(false);
         update_ltr114_controls_state();
         update_ltr212_controls_state();
