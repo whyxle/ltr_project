@@ -9,8 +9,10 @@ INCLUDEPATH += .. ../src
 SOURCES += \
     reliability_tests.cpp \
     ../src/io/measurement_writer.cpp \
+    ../src/acquisition/simulated_signal.cpp \
     ../src/acquisition/sync_timeline.cpp
 
 HEADERS += \
     ../src/io/measurement_writer.h \
+    ../src/acquisition/simulated_signal.h \
     ../src/acquisition/sync_timeline.h

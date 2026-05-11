@@ -12,6 +12,7 @@ SOURCES += \
     src/ltr/ltr_result.cpp \
     src/ltr/module.cpp \
     src/acquisition/ltr_workers.cpp \
+    src/acquisition/simulated_signal.cpp \
     src/acquisition/sync_timeline.cpp \
     src/io/measurement_writer.cpp
 
@@ -24,6 +25,7 @@ HEADERS += \
     src/ltr/ltr_result.h \
     src/ltr/module.h \
     src/acquisition/ltr_workers.h \
+    src/acquisition/simulated_signal.h \
     src/acquisition/sync_timeline.h \
     src/io/measurement_writer.h
 

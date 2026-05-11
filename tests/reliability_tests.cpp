@@ -6,6 +6,7 @@
 
 #include "io/measurement_writer.h"
 #include "acquisition/sync_timeline.h"
+#include "acquisition/simulated_signal.h"
 
 namespace {
 
@@ -38,6 +39,8 @@ private slots:
     void proportionalMapping();
     void syncStartFlow();
     void syncBaselineTimeout();
+    void simulatedSignalRatesAndTimeline();
+    void simulatedSignalReactionAfterDelay();
     void measurementWriterFormat();
 };
 
@@ -111,6 +114,83 @@ void ReliabilityTests::syncBaselineTimeout()
 
     QMutexLocker locker(&state.mutex);
     QCOMPARE(state.state, SyncSessionState::Failed);
+}
+
+void ReliabilityTests::simulatedSignalRatesAndTimeline()
+{
+    SimulatedSignalState state114;
+    SimulatedSignalConfig config114;
+    config114.moduleId = kSyncModule114;
+    config114.sampleRateHz = 100;
+    config114.timerPeriodSec = 0.03;
+
+    QVector<TimedSample> samples114;
+    for (int i = 0; i < 100; ++i)
+        samples114 += generateSimulatedSamples(state114, config114);
+
+    QCOMPARE(samples114.size(), 300);
+    QCOMPARE(samples114.at(0).globalTick, 0ULL);
+    QCOMPARE(samples114.at(1).globalTick, 10000ULL);
+    QCOMPARE(samples114.at(100).secondMark, 1U);
+    QCOMPARE(samples114.at(100).sampleInSecond, 0U);
+    QCOMPARE(samples114.last().secondMark, 2U);
+    QCOMPARE(samples114.last().sampleInSecond, 99U);
+
+    SimulatedSignalState state212;
+    SimulatedSignalConfig config212;
+    config212.moduleId = kSyncModule212;
+    config212.sampleRateHz = 150;
+    config212.timerPeriodSec = 0.03;
+
+    QVector<TimedSample> samples212;
+    for (int i = 0; i < 100; ++i)
+        samples212 += generateSimulatedSamples(state212, config212);
+
+    QCOMPARE(samples212.size(), 450);
+    QCOMPARE(samples212.at(150).secondMark, 1U);
+    QCOMPARE(samples212.at(150).sampleInSecond, 0U);
+    QCOMPARE(samples212.last().secondMark, 2U);
+    QCOMPARE(samples212.last().sampleInSecond, 149U);
+}
+
+void ReliabilityTests::simulatedSignalReactionAfterDelay()
+{
+    auto maxAbsInWindow = [](const QVector<TimedSample>& samples,
+                             double fromSec,
+                             double toSec) {
+        double maxValue = 0.0;
+        for (const TimedSample& sample : samples) {
+            const double t = static_cast<double>(sample.globalTick) / 1000000.0;
+            if (t >= fromSec && t < toSec)
+                maxValue = qMax(maxValue, qAbs(sample.value));
+        }
+        return maxValue;
+    };
+
+    SimulatedSignalState state114;
+    SimulatedSignalConfig config114;
+    config114.moduleId = kSyncModule114;
+    config114.sampleRateHz = 100;
+    config114.timerPeriodSec = 11.0;
+    const QVector<TimedSample> samples114 = generateSimulatedSamples(state114, config114);
+
+    SimulatedSignalState state212;
+    SimulatedSignalConfig config212;
+    config212.moduleId = kSyncModule212;
+    config212.sampleRateHz = 150;
+    config212.timerPeriodSec = 11.0;
+    config212.rangeVolts = 0.08;
+    config212.channelCount = 4;
+    config212.selectedChannel = 4;
+    const QVector<TimedSample> samples212 = generateSimulatedSamples(state212, config212);
+
+    const double baseline114 = maxAbsInWindow(samples114, 2.0, 7.5);
+    const double reaction114 = maxAbsInWindow(samples114, 8.5, 10.8);
+    QVERIFY2(reaction114 > baseline114 * 4.0, "LTR114 simulated reaction should be visibly larger than baseline");
+
+    const double baseline212 = maxAbsInWindow(samples212, 2.0, 7.5);
+    const double reaction212 = maxAbsInWindow(samples212, 8.5, 10.8);
+    QVERIFY2(reaction212 > baseline212 * 4.0, "LTR212 simulated reaction should be visibly larger than baseline");
 }
 
 void ReliabilityTests::measurementWriterFormat()

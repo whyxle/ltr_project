@@ -23,6 +23,7 @@
 #include "ltr/ltr114.h"
 #include "ltr/ltr212.h"
 #include "acquisition/ltr_workers.h"
+#include "acquisition/simulated_signal.h"
 #include "io/measurement_writer.h"
 
 #include <memory>
@@ -103,6 +104,9 @@ private:
     void update_simulation_controls_state();
     void update_ltr212_channel_limit();
     void set_capture_controls_enabled(bool enabled);
+    void activate_full_simulation_mode(const QString& reason);
+    int simulated_sample_rate(int moduleId) const;
+    SimulatedSignalConfig simulated_signal_config(int moduleId) const;
     QDockWidget* create_settings_dock(const QString& title, QWidget* content, const QString& objectName);
     QDockWidget* create_modules_dock(QWidget* content);
     void show_dock(QDockWidget* dock, bool floating);
@@ -143,7 +147,7 @@ private:
     QSpinBox* interval114Spin;
     QComboBox* syncMode114Combo;
     QGroupBox* simulationSettingsGroup;
-    QSpinBox* simulationRateSpin;
+    QSpinBox* simulationDelaySpin;
     QGroupBox* ltr212SettingsGroup;
     QComboBox* acqMode212Combo;
     QCheckBox* useClb212Check;
@@ -194,11 +198,8 @@ private:
     MeasurementWriter m_captureWriter212;
     bool m_simulationMode = false;
     bool m_simulateTwoModules = true;
-    double m_simulatedSampleAccumulator = 0.0;
-    double m_simulatedSampleAccumulator212 = 0.0;
-    int m_simulatedSampleRate = 2000;
-    quint64 m_simulatedSignalTick = 0;
-    quint64 m_simulatedSignalTick212 = 0;
+    SimulatedSignalState m_simulatedSignalState114;
+    SimulatedSignalState m_simulatedSignalState212;
     QTimer* m_simulationTimer = nullptr;
 
     QVector<QPointF> m_plotPoints212;

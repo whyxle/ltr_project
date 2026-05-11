@@ -35,6 +35,14 @@
 #include "ltr/ltr114.h"
 #include "ltr/ltr_result.h"
 
+namespace {
+
+constexpr bool kForceFullSimulation = true;
+constexpr int kSimulationTimerPeriodMs = 30;
+constexpr int kDefaultSimulationDelaySec = 8;
+
+}
+
 QString MainWindow::module_name(WORD mid)
 {
     switch (mid)
@@ -92,7 +100,7 @@ MainWindow::MainWindow(QWidget *parent)
     , interval114Spin(nullptr)
     , syncMode114Combo(nullptr)
     , simulationSettingsGroup(nullptr)
-    , simulationRateSpin(nullptr)
+    , simulationDelaySpin(nullptr)
     , ltr212SettingsGroup(nullptr)
     , acqMode212Combo(nullptr)
     , useClb212Check(nullptr)
@@ -121,8 +129,6 @@ MainWindow::MainWindow(QWidget *parent)
     , m_ltr212Slot(-1)
     , m_captureRunning(false)
     , m_simulationMode(false)
-    , m_simulatedSampleAccumulator(0.0)
-    , m_simulatedSampleAccumulator212(0.0)
 {
     ui->setupUi(this);
     qRegisterMetaType<QVector<TimedSample>>("QVector<TimedSample>");
@@ -317,11 +323,11 @@ void MainWindow::init_ui_replace()
 
     simulationSettingsGroup = new QGroupBox("Режим симуляции", this);
     QFormLayout* simulationLay = new QFormLayout(simulationSettingsGroup);
-    simulationRateSpin = new QSpinBox(simulationSettingsGroup);
-    simulationRateSpin->setRange(1, 4000);
-    simulationRateSpin->setValue(sampleRateSpin->value());
-    simulationRateSpin->setSuffix(" Гц");
-    simulationLay->addRow("Частота симуляции:", simulationRateSpin);
+    simulationDelaySpin = new QSpinBox(simulationSettingsGroup);
+    simulationDelaySpin->setRange(0, 60);
+    simulationDelaySpin->setValue(kDefaultSimulationDelaySec);
+    simulationDelaySpin->setSuffix(" с");
+    simulationLay->addRow("Задержка отклика:", simulationDelaySpin);
     simulationSettingsDock = create_settings_dock("Режим симуляции", simulationSettingsGroup, "simulationSettingsDock");
 
     ltr212SettingsGroup = new QGroupBox("Настройки LTR212", this);
@@ -331,7 +337,7 @@ void MainWindow::init_ui_replace()
     acqMode212Combo->addItem("4 канала, средняя точность", LTR212_FOUR_CHANNELS_WITH_MEDIUM_RESOLUTION);
     acqMode212Combo->addItem("4 канала, высокая точность", LTR212_FOUR_CHANNELS_WITH_HIGH_RESOLUTION);
     acqMode212Combo->addItem("8 каналов, высокая точность", LTR212_EIGHT_CHANNELS_WITH_HIGH_RESOLUTION);
-    acqMode212Combo->setCurrentIndex(1);
+    acqMode212Combo->setCurrentIndex(0);
 
     useClb212Check = new QCheckBox(ltr212SettingsGroup);
     useClb212Check->setChecked(false);
@@ -350,7 +356,7 @@ void MainWindow::init_ui_replace()
 
     channelCount212Spin = new QSpinBox(ltr212SettingsGroup);
     channelCount212Spin->setRange(1, 4);
-    channelCount212Spin->setValue(1);
+    channelCount212Spin->setValue(4);
 
     range212Combo = new QComboBox(ltr212SettingsGroup);
     range212Combo->addItem("±10 мВ", LTR212_SCALE_B_10);
@@ -572,6 +578,51 @@ void MainWindow::run_ltr11_module(const QString& crate_sn, int ltr11_slot)
     Q_UNUSED(ltr11_slot)
 }
 
+void MainWindow::activate_full_simulation_mode(const QString& reason)
+{
+    if (!reason.isEmpty())
+        appendInfo(reason, true);
+
+    if (m_crate && m_crate->is_open())
+        m_crate->stop_sync_marks();
+    m_crate.reset();
+
+    m_simulationMode = true;
+    m_simulateTwoModules = true;
+    m_crateSerial = "SIMULATED_CRATE";
+    m_ltr114Slot = 1;
+    m_ltr212Slot = 2;
+
+    moduleWidgets.clear();
+    if (modulesList)
+        modulesList->clear();
+
+    const QVector<QPair<int, QString>> simulatedModules = {
+        {m_ltr114Slot, "LTR114 (SIM)"},
+        {m_ltr212Slot, "LTR212 (SIM)"},
+    };
+
+    for (const auto& module : simulatedModules) {
+        QWidget* w = createModuleItemWidget(module.first, module.second, true);
+        QListWidgetItem* it = new QListWidgetItem(modulesList);
+        it->setSizeHint(w->sizeHint());
+        modulesList->addItem(it);
+        modulesList->setItemWidget(it, w);
+        moduleWidgets.insert(module.first, w);
+    }
+
+    appendInfo("Симулированный крейт создан: LTR114 в слоте 1, LTR212 в слоте 2.");
+    run_ltr114_module(m_crateSerial, m_ltr114Slot);
+    run_ltr212_module(m_crateSerial, m_ltr212Slot);
+
+    if (startButton)
+        startButton->setEnabled(true);
+    update_ltr114_controls_state();
+    update_ltr212_controls_state();
+    update_simulation_controls_state();
+    update_plot_visibility();
+}
+
 void MainWindow::run_ltr114_module(const QString& crate_sn, int ltr114_slot)
 {
     m_crateSerial = crate_sn;
@@ -584,10 +635,8 @@ void MainWindow::run_ltr114_module(const QString& crate_sn, int ltr114_slot)
 bool MainWindow::open_ltr114_for_capture()
 {
     if (m_simulationMode) {
-        m_simulatedSampleAccumulator = 0.0;
-        m_simulatedSignalTick = 0;
-        const int simRate = simulationRateSpin ? simulationRateSpin->value() : sampleRateSpin->value();
-        appendInfo(QString("Сбор запущен в режиме симуляции. Частота=%1 Гц").arg(simRate));
+        appendInfo(QString("LTR114 работает в симуляции. Частота=%1 Гц")
+                       .arg(simulated_sample_rate(0)));
         return true;
     }
 
@@ -684,8 +733,9 @@ void MainWindow::close_ltr114_capture()
 bool MainWindow::open_ltr212_for_capture()
 {
     if (m_simulationMode) {
-        appendInfo("Симуляция LTR212 не поддерживается пока");
-        return false;
+        appendInfo(QString("LTR212 работает в симуляции. Частота=%1 Гц")
+                       .arg(simulated_sample_rate(1)));
+        return true;
     }
 
     if (m_crateSerial.isEmpty() || m_ltr212Slot < 0) {
@@ -1018,7 +1068,7 @@ void MainWindow::update_ltr114_controls_state()
         return;
 
     const bool workerRunning = m_ltr114Thread && m_ltr114Thread->isRunning();
-    const bool available = !m_simulationMode && m_ltr114Slot >= 0;
+    const bool available = m_ltr114Slot >= 0;
     ltr114SettingsGroup->setVisible(true);
     ltr114SettingsGroup->setEnabled(available
                                     && !m_captureRunning
@@ -1054,6 +1104,91 @@ void MainWindow::update_ltr212_channel_limit()
     const int currentValue = qMin(channelCount212Spin->value(), maxChannels);
     channelCount212Spin->setMaximum(maxChannels);
     channelCount212Spin->setValue(currentValue);
+}
+
+int MainWindow::simulated_sample_rate(int moduleId) const
+{
+    if (moduleId == 1) {
+        const int acqMode = acqMode212Combo ? acqMode212Combo->currentData().toInt()
+                                            : LTR212_FOUR_CHANNELS_WITH_MEDIUM_RESOLUTION;
+        switch (acqMode) {
+        case LTR212_FOUR_CHANNELS_WITH_MEDIUM_RESOLUTION:
+            return 150;
+        case LTR212_FOUR_CHANNELS_WITH_HIGH_RESOLUTION:
+            return 75;
+        case LTR212_EIGHT_CHANNELS_WITH_HIGH_RESOLUTION:
+            return 38;
+        default:
+            return 150;
+        }
+    }
+
+    return qMax(1, sampleRateSpin ? sampleRateSpin->value() : 100);
+}
+
+SimulatedSignalConfig MainWindow::simulated_signal_config(int moduleId) const
+{
+    SimulatedSignalConfig config;
+    config.moduleId = moduleId == 1 ? kSyncModule212 : kSyncModule114;
+    config.sampleRateHz = simulated_sample_rate(moduleId);
+    config.timerPeriodSec = static_cast<double>(kSimulationTimerPeriodMs) / 1000.0;
+    config.interactionDelaySec = simulationDelaySpin ? simulationDelaySpin->value()
+                                                     : kDefaultSimulationDelaySec;
+
+    if (moduleId == 1) {
+        const int acqMode = acqMode212Combo ? acqMode212Combo->currentData().toInt()
+                                            : LTR212_FOUR_CHANNELS_WITH_MEDIUM_RESOLUTION;
+        const int maxChannels = (acqMode == LTR212_EIGHT_CHANNELS_WITH_HIGH_RESOLUTION) ? 8 : 4;
+        const int channelCount = qBound(1,
+                                        channelCount212Spin ? channelCount212Spin->value() : 4,
+                                        maxChannels);
+        const int rangeCode = range212Combo ? range212Combo->currentData().toInt() : LTR212_SCALE_B_80;
+        const int refVoltage = refVoltage212Combo ? refVoltage212Combo->currentData().toInt() : LTR212_REF_5V;
+
+        config.selectedChannel = channelCount;
+        config.channelCount = channelCount;
+        config.acCoupled = acMode212Combo && acMode212Combo->currentData().toInt() != 0;
+        config.referenceVoltage = refVoltage == LTR212_REF_2_5V ? 2.5 : 5.0;
+        config.unipolarRange = rangeCode >= LTR212_SCALE_U_10;
+
+        switch (rangeCode) {
+        case LTR212_SCALE_B_10:
+        case LTR212_SCALE_U_10:
+            config.rangeVolts = 0.010;
+            break;
+        case LTR212_SCALE_B_20:
+        case LTR212_SCALE_U_20:
+            config.rangeVolts = 0.020;
+            break;
+        case LTR212_SCALE_B_40:
+        case LTR212_SCALE_U_40:
+            config.rangeVolts = 0.040;
+            break;
+        case LTR212_SCALE_B_80:
+        case LTR212_SCALE_U_80:
+        default:
+            config.rangeVolts = 0.080;
+            break;
+        }
+        return config;
+    }
+
+    const int rangeCode = range114Combo ? range114Combo->currentData().toInt() : LTR114_URANGE_04;
+    config.selectedChannel = physicalChannel114Spin ? physicalChannel114Spin->value() : 1;
+    config.channelCount = 1;
+    switch (rangeCode) {
+    case LTR114_URANGE_10:
+        config.rangeVolts = 10.0;
+        break;
+    case LTR114_URANGE_2:
+        config.rangeVolts = 2.0;
+        break;
+    case LTR114_URANGE_04:
+    default:
+        config.rangeVolts = 0.4;
+        break;
+    }
+    return config;
 }
 
 void MainWindow::set_capture_controls_enabled(bool enabled)
@@ -1095,9 +1230,8 @@ bool MainWindow::open_capture_file(int moduleId)
     const QString path = QString("ltr_capture_%1_%2.txt")
                              .arg(moduleName.toLower())
                              .arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss"));
-    int rateHz = m_simulationMode && simulationRateSpin
-                     ? simulationRateSpin->value()
-                     : sampleRateSpin->value();
+    int rateHz = m_simulationMode ? simulated_sample_rate(moduleId)
+                                  : sampleRateSpin->value();
     if (!m_simulationMode && moduleId == 0 && m_ltr114) {
         rateHz = qMax(1, qRound(static_cast<double>(LTR114_FREQ(*m_ltr114->handle()))));
     } else if (!m_simulationMode && moduleId == 1 && m_ltr212 && m_ltr212->handle()->Fs > 0.0) {
@@ -1262,11 +1396,8 @@ void MainWindow::on_start_capture_clicked()
         }
 
         m_captureRunning = true;
-        m_simulatedSampleRate = qMax(1, simulationRateSpin ? simulationRateSpin->value() : sampleRateSpin->value());
-        m_simulatedSampleAccumulator = 0.0;
-        m_simulatedSampleAccumulator212 = 0.0;
-        m_simulatedSignalTick = 0;
-        m_simulatedSignalTick212 = 0;
+        m_simulatedSignalState114.reset();
+        m_simulatedSignalState212.reset();
 
         set_capture_controls_enabled(false);
 
@@ -1285,8 +1416,12 @@ void MainWindow::on_start_capture_clicked()
         m_usingLtr114 = false;
         m_usingLtr212 = false;
         update_plot_visibility();
-        m_simulationTimer->start(30);
-        appendInfo("Симуляция запущена через QTimer.");
+        m_simulationTimer->start(kSimulationTimerPeriodMs);
+        appendInfo(QString("Полная симуляция запущена: LTR114=%1 Гц, LTR212=%2 Гц, отклик через %3 с.")
+                       .arg(simulated_sample_rate(0))
+                       .arg(simulated_sample_rate(1))
+                       .arg(simulationDelaySpin ? simulationDelaySpin->value()
+                                                : kDefaultSimulationDelaySec));
         return;
     }
 
@@ -1511,9 +1646,8 @@ void MainWindow::process_voltage_samples(const QVector<TimedSample>& voltageSamp
 
 
     if (saveToFileCheck->isChecked() && !modulePendingFileSamples.isEmpty()) {
-        int rateHz = m_simulationMode && simulationRateSpin
-                         ? simulationRateSpin->value()
-                         : sampleRateSpin->value();
+        int rateHz = m_simulationMode ? simulated_sample_rate(moduleId)
+                                      : sampleRateSpin->value();
         if (!m_simulationMode && moduleId == 0 && m_ltr114) {
             rateHz = qMax(1, qRound(static_cast<double>(LTR114_FREQ(*m_ltr114->handle()))));
         } else if (!m_simulationMode && moduleId == 1 && m_ltr212 && m_ltr212->handle()->Fs > 0.0) {
@@ -1536,78 +1670,23 @@ void MainWindow::process_voltage_samples(const QVector<TimedSample>& voltageSamp
 
 QVector<TimedSample> MainWindow::generate_simulated_samples(int moduleId)
 {
-    QVector<TimedSample> samples;
-    const double sampleRate = static_cast<double>(qMax(1, m_simulatedSampleRate));
-    const double timerPeriodSec = 0.03;
-    double& accumulator = (moduleId == 1) ? m_simulatedSampleAccumulator212 : m_simulatedSampleAccumulator;
-    quint64& signalTick = (moduleId == 1) ? m_simulatedSignalTick212 : m_simulatedSignalTick;
-
-    accumulator += sampleRate * timerPeriodSec;
-    int samplesToGenerate = static_cast<int>(accumulator);
-    accumulator -= samplesToGenerate;
-
-    if (samplesToGenerate <= 0)
-        return samples;
-
-    samples.reserve(samplesToGenerate);
-
-    const quint64 ticksPerSample = 1000000ULL / static_cast<quint64>(sampleRate);
-    const double dt = 1.0 / sampleRate;
-
-
-    const double freq1 = (moduleId == 1) ? qMin(7.0, sampleRate / 17.0) : qMin(5.0, sampleRate / 20.0);
-    const double freq2 = (moduleId == 1) ? qMin(11.0, sampleRate / 10.0) : qMin(13.0, sampleRate / 12.0);
-    const double amp1 = (moduleId == 1) ? 0.00095 : 0.0012;
-    const double amp2 = (moduleId == 1) ? 0.00060 : 0.00045;
-    const double amp3 = (moduleId == 1) ? 0.00022 : 0.00015;
-    const double phase2 = (moduleId == 1) ? 1.4 : 0.8;
-    const double slowFreq = (moduleId == 1) ? 0.55 : 0.35;
-    constexpr double pi = 3.14159265358979323846;
-
-    for (int i = 0; i < samplesToGenerate; ++i) {
-        const double t = (static_cast<double>(signalTick) + static_cast<double>(i)) * dt;
-        const double signal = amp1 * std::sin(2.0 * pi * freq1 * t)
-                              + amp2 * std::sin(2.0 * pi * freq2 * t + phase2)
-                              + amp3 * std::sin(2.0 * pi * slowFreq * t);
-
-        TimedSample s{};
-        s.globalTick     = signalTick * ticksPerSample + static_cast<quint64>(i) * ticksPerSample;
-        s.secondMark     = static_cast<quint32>(signalTick / static_cast<quint64>(sampleRate));
-        s.sampleInSecond = static_cast<quint32>(signalTick % static_cast<quint64>(sampleRate));
-        s.value          = signal;
-
-        samples.append(s);
-        ++signalTick;
-    }
-
-    return samples;
+    SimulatedSignalState& state = (moduleId == 1) ? m_simulatedSignalState212
+                                                  : m_simulatedSignalState114;
+    return ::generateSimulatedSamples(state, simulated_signal_config(moduleId));
 }
 
 void MainWindow::init_ltr()
 {
     appendInfo("Начало поиска крейтов...");
 
+    if (kForceFullSimulation) {
+        activate_full_simulation_mode("Включен кодовый режим полной симуляции. Реальное железо не используется.");
+        return;
+    }
+
     auto crates = Crate::enumerate_crates();
     if (crates.isEmpty()) {
-        m_simulationMode = true;
-        m_crateSerial = "SIMULATED_CRATE";
-        m_ltr114Slot = 1;
-
-        appendInfo("Нет подключенных крейтов. Включен режим симуляции.", true);
-
-        QWidget* w = createModuleItemWidget(1, "LTR114 (SIM)", true);
-        QListWidgetItem* it = new QListWidgetItem(modulesList);
-        it->setSizeHint(w->sizeHint());
-        modulesList->addItem(it);
-        modulesList->setItemWidget(it, w);
-        moduleWidgets.insert(1, w);
-
-        appendInfo("Симулированный крейт создан, модуль LTR114 виртуально доступен в слоте 1.");
-        run_ltr114_module(m_crateSerial, m_ltr114Slot);
-        update_ltr114_controls_state();
-        update_ltr212_controls_state();
-        update_simulation_controls_state();
-        update_plot_visibility();
+        activate_full_simulation_mode("Нет подключенных крейтов. Включен режим полной симуляции.");
         return;
     }
 
